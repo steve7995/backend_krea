@@ -488,57 +488,116 @@ const processSessionAttempt = async (sessionId) => {
     const sessionEndTime = new Date(`${session.sessionDate}T${session.sessionEndTime}`);
     console.log(`[ProcessSession] Session window: ${sessionStartTime.toISOString()} to ${sessionEndTime.toISOString()}`);
 
-    // Add 3-minute buffer before and after for fetching
-    const bufferMs = 3 * 60 * 1000;
-    const fetchStartTime = new Date(sessionStartTime.getTime() - bufferMs);
-    const fetchEndTime = new Date(sessionEndTime.getTime() + bufferMs);
+    // Check if this is an old/past session (logged with past timestamp)
+    const now = new Date();
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const isOldSession = sessionEndTime < oneHourAgo;
 
-    // Debug logs
-    console.log(
-      `[DEBUG] Session start time from DB: ${session.sessionDate} ${session.sessionStartTime}`
-    );
-    console.log(
-      `[DEBUG] Calculated sessionStartTime: ${sessionStartTime.toISOString()}`
-    );
-    console.log(
-      `[DEBUG] Fetch window: ${fetchStartTime.toISOString()} to ${fetchEndTime.toISOString()}`
-    );
-    console.log(`[DEBUG] Current server time: ${new Date().toISOString()}`);
+    console.log(`[ProcessSession] Current time: ${now.toISOString()}`);
+    console.log(`[ProcessSession] Session end time: ${sessionEndTime.toISOString()}`);
+    console.log(`[ProcessSession] Is old session (>1 hour ago): ${isOldSession}`);
 
-    // 6. Fetch HR data from Google Fit with buffer
-    console.log(
-      `[ProcessSession] Session ${sessionId} - Fetching data from Google Fit...`
-    );
-    console.log(
-      `[ProcessSession] Session window: ${sessionStartTime.toISOString()} to ${sessionEndTime.toISOString()}`
-    );
-    console.log(
-      `[ProcessSession] Fetch window (with buffer): ${fetchStartTime.toISOString()} to ${fetchEndTime.toISOString()}`
-    );
+    let filteredHrData = [];
 
-
-
-
-
-    
-    const hrData = await fetchGoogleFitData(
-      accessToken,
-      fetchStartTime,
-      fetchEndTime
-    );
-
-    // Filter data to only include readings within actual session window
-    let filteredHrData = hrData.filter((reading) => {
-      const readingTime = reading.timestamp;
-      return (
-        readingTime >= sessionStartTime.getTime() &&
-        readingTime <= sessionEndTime.getTime()
+    // 6. Fetch HR data from Google Fit
+    if (isOldSession) {
+      // OLD/PAST SESSION: Use progressive 3-cycle buffers (10min, 20min, 30min)
+      console.log(
+        `[ProcessSession] Session ${sessionId} - OLD SESSION detected, using progressive buffers...`
       );
-    });
 
-    console.log(
-      `[ProcessSession] Session ${sessionId} - Fetched ${hrData.length} total points, ${filteredHrData.length} within session window`
-    );
+      const bufferCycles = [
+        { name: '10min', ms: 10 * 60 * 1000 },
+        { name: '20min', ms: 20 * 60 * 1000 },
+        { name: '30min', ms: 30 * 60 * 1000 }
+      ];
+
+      let allFetchedData = [];
+      const seenTimestamps = new Set();
+
+      for (const buffer of bufferCycles) {
+        const fetchStartTime = new Date(sessionStartTime.getTime() - buffer.ms);
+        const fetchEndTime = new Date(sessionEndTime.getTime() + buffer.ms);
+
+        console.log(
+          `[ProcessSession] Cycle ${buffer.name}: Fetching ${fetchStartTime.toISOString()} to ${fetchEndTime.toISOString()}`
+        );
+
+        try {
+          const cycleData = await fetchGoogleFitData(
+            accessToken,
+            fetchStartTime,
+            fetchEndTime
+          );
+
+          let newPoints = 0;
+          cycleData.forEach(point => {
+            if (!seenTimestamps.has(point.timestamp)) {
+              seenTimestamps.add(point.timestamp);
+              allFetchedData.push(point);
+              newPoints++;
+            }
+          });
+
+          console.log(
+            `[ProcessSession] Cycle ${buffer.name}: Found ${cycleData.length} points, ${newPoints} new`
+          );
+        } catch (cycleError) {
+          console.error(
+            `[ProcessSession] Error in ${buffer.name} cycle:`,
+            cycleError.message
+          );
+        }
+      }
+
+      console.log(
+        `[ProcessSession] Total fetched across all cycles: ${allFetchedData.length} unique points`
+      );
+
+      // Filter to session window
+      filteredHrData = allFetchedData.filter((reading) => {
+        return (
+          reading.timestamp >= sessionStartTime.getTime() &&
+          reading.timestamp <= sessionEndTime.getTime()
+        );
+      });
+
+      console.log(
+        `[ProcessSession] Session ${sessionId} - After filtering to session window: ${filteredHrData.length} points`
+      );
+
+    } else {
+      // RECENT SESSION: Use simple 3-minute buffer
+      console.log(
+        `[ProcessSession] Session ${sessionId} - RECENT SESSION, using standard 3-minute buffer...`
+      );
+
+      const bufferMs = 3 * 60 * 1000;
+      const fetchStartTime = new Date(sessionStartTime.getTime() - bufferMs);
+      const fetchEndTime = new Date(sessionEndTime.getTime() + bufferMs);
+
+      console.log(
+        `[ProcessSession] Fetch window: ${fetchStartTime.toISOString()} to ${fetchEndTime.toISOString()}`
+      );
+
+      const hrData = await fetchGoogleFitData(
+        accessToken,
+        fetchStartTime,
+        fetchEndTime
+      );
+
+      // Filter to session window
+      filteredHrData = hrData.filter((reading) => {
+        return (
+          reading.timestamp >= sessionStartTime.getTime() &&
+          reading.timestamp <= sessionEndTime.getTime()
+        );
+      });
+
+      console.log(
+        `[ProcessSession] Session ${sessionId} - Fetched ${hrData.length} total points, ${filteredHrData.length} within session window`
+      );
+    }
 
     // 7. Check if we have any data at all (before imputation)
     // If we have zero data points, we need to retry or check historical
