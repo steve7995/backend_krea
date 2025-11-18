@@ -1,0 +1,15 @@
+// old cred => my google oauth
+GOOGLE_CLIENT_ID=45946153604-kkpr1i9t3pvkinhf624h0d4bhbui7u72.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=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
+
+
+
+671696143444-1r7qc8up6jdu88s0399jiigl79ddjq7b.apps.googleusercontent.com
+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
+
+
+
+{
+  "patientId": "42",
+  "sessionStartTime": "2025-10-09T11:50:00"
+}

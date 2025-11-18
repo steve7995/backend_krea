@@ -1,15 +1,15 @@
-import { User, Session, GoogleToken, HistoricalHRData, WeeklyScore } from '../models/index.js';
+import { User, Session, WeeklyScore, RehabPlan } from '../models/index.js';
 import { Op } from 'sequelize';
 import { calculateHeartRateZones } from '../utils/calculations.js';
-import { 
-  generateRetrySchedule, 
+import {
+  generateRetrySchedule,
   calculateNextAttemptTime,
   updateRetryScheduleItem,
-  getNextPendingAttempt 
+  getNextPendingAttempt
 } from '../utils/scheduleHelper.js';
 import { acquireTokenLock, releaseTokenLock, getValidToken } from '../utils/tokenManager.js';
-import { 
-  fetchGoogleFitData, 
+import {
+  fetchGoogleFitData,
   validateDataQuality,
   calculateSessionScore,
   determineRiskLevel,
@@ -18,15 +18,272 @@ import {
   extractHRValues
 } from '../utils/googleFit.js';
 import { generateSessionSummary } from '../utils/calculations.js';
+import { formatForSpectrum, } from '../utils/spectrumFormatter.js';
+import axios from 'axios';
 
 // ========================================
-// START SESSION
+// CAPTURE PATIENT SESSION TIME (Start/Stop Actions)
 // ========================================
-export const startSession = async (req, res) => {
+export const capturePatientSessionTime = async (req, res) => {
   try {
-    const { patientId, weekNumber } = req.body;
-    
-    // 1. Validate patient exists
+    const { patientId, sessionStartTime, sessionEndTime, action } = req.body;
+
+    // Validate action
+    if (!action || !['start', 'stop'].includes(action)) {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'action is required and must be "start" or "stop"'
+      });
+    }
+
+    // ==================== ACTION: START ====================
+    if (action === 'start') {
+      if (!patientId || !sessionStartTime) {
+        return res.status(400).json({
+          status: 'failure',
+          message: 'patientId and sessionStartTime are required for start action'
+        });
+      }
+
+      const user = await User.findByPk(patientId);
+      if (!user) {
+        return res.status(404).json({
+          status: 'failure',
+          message: 'Patient not found'
+        });
+      }
+
+      // Check if there's already an active session for this patient
+      const activeSession = await Session.findOne({
+        where: {
+          patientId,
+          status: 'active'
+        }
+      });
+
+      if (activeSession) {
+        return res.status(400).json({
+          status: 'failure',
+          message: 'Patient already has an active session. Please stop the current session first.',
+          activeSessionId: activeSession.id
+        });
+      }
+
+      // Determine current week
+      const totalSessions = await Session.count({ where: { patientId } });
+      let weekNumber = Math.floor(totalSessions / 3) + 1;
+
+      if (weekNumber > user.regime) {
+        weekNumber = user.regime;
+      }
+
+      // Get rehab plan data for this week
+      const rehabPlan = await RehabPlan.findOne({
+        where: { patientId, weekNumber }
+      });
+
+      if (!rehabPlan) {
+        return res.status(404).json({
+          status: 'failure',
+          message: `Rehab plan not found for patient ${patientId}, week ${weekNumber}`
+        });
+      }
+
+      // Calculate sessionAttemptNumber (session number within current week)
+      const weekSessions = await Session.count({
+        where: { patientId, weekNumber }
+      });
+      const sessionAttemptNumber = weekSessions + 1;
+
+      // Calculate estimated end time based on rehab plan duration
+      const startTime = new Date(sessionStartTime);
+      const estimatedEndTime = new Date(startTime.getTime() + rehabPlan.sessionDuration * 60 * 1000);
+      const estimatedProcessingStartsAt = new Date(estimatedEndTime.getTime() + 5 * 60 * 1000); // 5 min buffer
+
+      console.log(`[SessionStart] Start: ${startTime.toISOString()}, Estimated End: ${estimatedEndTime.toISOString()}, Planned Duration: ${rehabPlan.sessionDuration} min`);
+
+      // Create session with status 'active'
+      const session = await Session.create({
+        patientId,
+        weekNumber,
+        sessionAttemptNumber,
+        sessionType: 'start_stop',
+        sessionDate: new Date(sessionStartTime).toISOString().split('T')[0],
+        sessionStartTime: startTime.toTimeString().split(' ')[0],
+        sessionEndTime: estimatedEndTime.toTimeString().split(' ')[0], // Pre-calculated from plan
+        actualDuration: rehabPlan.sessionDuration, // Default to planned duration
+        targetHR: rehabPlan.targetHR,
+        maxPermissibleHR: rehabPlan.maxPermissibleHR,
+        warmupZoneMin: rehabPlan.warmupZoneMin,
+        warmupZoneMax: rehabPlan.warmupZoneMax,
+        exerciseZoneMin: rehabPlan.exerciseZoneMin,
+        exerciseZoneMax: rehabPlan.exerciseZoneMax,
+        cooldownZoneMin: rehabPlan.cooldownZoneMin,
+        cooldownZoneMax: rehabPlan.cooldownZoneMax,
+        sessionDuration: rehabPlan.sessionDuration, // Planned duration from rehab plan
+        status: 'active',
+        processingStartsAt: estimatedProcessingStartsAt // Pre-calculated
+      });
+
+      console.log(`[SessionStart] Session ${session.id} created with status 'active'`);
+
+      // POST to Spectrum - ONLY patientId and sessionDuration
+      const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/cardiac-rehab-session/${patientId}`;
+
+      const spectrumPayload = {
+        patientId: patientId,
+        sessionDuration: rehabPlan.sessionDuration
+      };
+
+      try {
+        const spectrumResponse = await axios.post(SPECTRUM_URL, spectrumPayload, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        });
+
+        console.log('[SessionStart] Successfully posted to Spectrum:', spectrumResponse.data);
+      } catch (spectrumError) {
+        console.error('[SessionStart] Error posting to Spectrum:', spectrumError.message);
+        // Don't fail the whole request if Spectrum post fails
+      }
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Session started successfully',
+        sessionId: session.id,
+        weekNumber: weekNumber,
+        sessionAttemptNumber: sessionAttemptNumber,
+        plannedDuration: rehabPlan.sessionDuration
+      });
+    }
+
+    // ==================== ACTION: STOP ====================
+    if (action === 'stop') {
+      if (!patientId || !sessionEndTime) {
+        return res.status(400).json({
+          status: 'failure',
+          message: 'patientId and sessionEndTime are required for stop action'
+        });
+      }
+
+      // Find active session for this patient
+      const activeSession = await Session.findOne({
+        where: {
+          patientId,
+          status: 'active'
+        },
+        order: [['createdAt', 'DESC']]
+      });
+
+      console.log(`[SessionStop] Looking for active session for patient ${patientId}...`);
+
+      if (!activeSession) {
+        console.log(`[SessionStop] No active session found for patient ${patientId}`);
+        return res.status(404).json({
+          status: 'failure',
+          message: 'No active session found for this patient'
+        });
+      }
+
+      console.log(`[SessionStop] Found active session ${activeSession.id} for patient ${patientId}`);
+
+      // Calculate times
+      const startTime = new Date(`${activeSession.sessionDate}T${activeSession.sessionStartTime}`);
+      const userStopTime = new Date(sessionEndTime);
+      const plannedEndTime = new Date(`${activeSession.sessionDate}T${activeSession.sessionEndTime}`); // This was set at START based on rehab plan
+
+      console.log(`[SessionStop] Session ${activeSession.id} - Start: ${startTime.toISOString()}, User stop: ${userStopTime.toISOString()}, Planned end: ${plannedEndTime.toISOString()}`);
+
+      // Check if user is stopping AFTER the planned end time
+      if (userStopTime >= plannedEndTime) {
+        console.log(`[SessionStop] Stop time is after planned end time. Ignoring stop request, using rehab plan times.`);
+
+        // Return success but don't update anything - use times already set from rehab plan
+        return res.status(200).json({
+          status: 'success',
+          message: 'Session already completed based on rehab plan duration',
+          sessionId: activeSession.id,
+          actualDuration: activeSession.actualDuration, // From rehab plan
+          plannedDuration: activeSession.sessionDuration,
+          note: 'Stop time was after planned end time, using rehab plan duration'
+        });
+      }
+
+      // User stopped BEFORE planned end time - update with actual values
+      const actualDurationMinutes = Math.round((userStopTime - startTime) / (1000 * 60));
+
+      console.log(`[SessionStop] Session ${activeSession.id} stopped early - Actual duration: ${actualDurationMinutes} min (planned: ${activeSession.sessionDuration} min)`);
+
+      if (actualDurationMinutes <= 0) {
+        return res.status(400).json({
+          status: 'failure',
+          message: 'Session end time must be after start time',
+          debug: {
+            startTime: startTime.toISOString(),
+            endTime: userStopTime.toISOString(),
+            calculatedDuration: actualDurationMinutes
+          }
+        });
+      }
+
+      // Calculate when processing should start (5 minute buffer after session ends)
+      const bufferMs = 5 * 60 * 1000; // 5 minute buffer
+      const processingStartTime = new Date(userStopTime.getTime() + bufferMs);
+
+      // Update session with ACTUAL end time and duration (user stopped early)
+      await activeSession.update({
+        sessionEndTime: userStopTime.toTimeString().split(' ')[0], // Override planned with actual
+        actualDuration: actualDurationMinutes, // Override planned with actual
+        status: 'in_progress',
+        processingStartsAt: processingStartTime // Override planned with actual
+      });
+
+      console.log(`[SessionStop] ✓ Session ${activeSession.id} stopped early. Actual duration: ${actualDurationMinutes} min (planned: ${activeSession.sessionDuration} min), Processing starts at: ${processingStartTime.toISOString()}`);
+
+      // NO POST to Spectrum on stop (as per user requirement)
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Session stopped successfully',
+        sessionId: activeSession.id,
+        actualDuration: actualDurationMinutes,
+        plannedDuration: activeSession.sessionDuration,
+        processingStartsAt: processingStartTime.toISOString()
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in capturePatientSessionTime:', error);
+    return res.status(500).json({
+      status: 'failure',
+      message: 'Internal server error'
+    });
+  }
+};
+
+
+
+// ========================================
+// INDEPENDENT EXERCISE SCORING (for Spectrum ad-hoc sessions)
+// ========================================
+export const scoreIndependentExercise = async (req, res) => {
+  try {
+    const { patientId, sessionStartTime, sessionEndTime } = req.body;
+
+    // Validate inputs
+    if (!patientId || !sessionStartTime || !sessionEndTime) {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'patientId, sessionStartTime, and sessionEndTime are required'
+      });
+    }
+
+    console.log(`[IndependentExercise] Request for patient ${patientId}`);
+    console.log(`[IndependentExercise] Time window: ${sessionStartTime} to ${sessionEndTime}`);
+
+    // Get patient data
     const user = await User.findByPk(patientId);
     if (!user) {
       return res.status(404).json({
@@ -34,331 +291,236 @@ export const startSession = async (req, res) => {
         message: 'Patient not found'
       });
     }
-    
-    // 2. Validate week number
-    if (weekNumber < 1 || weekNumber > user.regime) {
+
+    // Parse session times
+    const startTime = new Date(sessionStartTime);
+    const endTime = new Date(sessionEndTime);
+
+    // Validate times
+    if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
       return res.status(400).json({
         status: 'failure',
-        message: `Invalid week number. Patient is on ${user.regime}-week regime.`
+        message: 'Invalid date format for sessionStartTime or sessionEndTime'
       });
     }
-    
-    // 3. Check 18-hour gap from last session
-    const lastSession = await Session.findOne({
-      where: { patientId },
-      order: [['createdAt', 'DESC']]
-    });
-    
-    if (lastSession) {
-      const hoursSinceLastSession = (Date.now() - lastSession.createdAt) / (1000 * 60 * 60);
-      if (hoursSinceLastSession < 18) {
-        return res.status(400).json({
-          status: 'failure',
-          message: `Please wait ${Math.ceil(18 - hoursSinceLastSession)} more hours before starting next session`,
-          nextSessionAvailable: new Date(lastSession.createdAt.getTime() + 18 * 60 * 60 * 1000)
-        });
-      }
+
+    if (endTime <= startTime) {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'sessionEndTime must be after sessionStartTime'
+      });
     }
-    
-    // 4. Get session attempt number for this week
+
+    // Calculate session duration in minutes
+    const durationMinutes = Math.round((endTime - startTime) / (1000 * 60));
+
+    console.log(`[IndependentExercise] Session duration: ${durationMinutes} minutes`);
+
+    // Determine current week (same logic as start action)
+    const totalSessions = await Session.count({ where: { patientId } });
+    let weekNumber = Math.floor(totalSessions / 3) + 1;
+
+    if (weekNumber > user.regime) {
+      weekNumber = user.regime;
+    }
+
+    console.log(`[IndependentExercise] Week number: ${weekNumber}`);
+
+    // Get rehab plan data for this week
+    const rehabPlan = await RehabPlan.findOne({
+      where: { patientId, weekNumber }
+    });
+
+    if (!rehabPlan) {
+      return res.status(404).json({
+        status: 'failure',
+        message: `Rehab plan not found for patient ${patientId}, week ${weekNumber}`
+      });
+    }
+
+    // Calculate sessionAttemptNumber (session number within current week)
     const weekSessions = await Session.count({
       where: { patientId, weekNumber }
     });
     const sessionAttemptNumber = weekSessions + 1;
-    
-    // 5. Calculate zones for this week
-    const zones = calculateHeartRateZones(user.age, user.betaBlockers, user.lowEF, weekNumber);
-    
-    // 6. Create session record
-    const now = new Date();
+
+    console.log(`[IndependentExercise] Session attempt number: ${sessionAttemptNumber}`);
+
+    // Calculate when processing should start (5 minute buffer after session ends)
+    const bufferMs = 5 * 60 * 1000;
+    const processingStartTime = new Date(endTime.getTime() + bufferMs);
+
+    // Generate retry schedule
+    const retrySchedule = generateRetrySchedule(endTime);
+
+    // Create Session record with sessionType='complete'
     const session = await Session.create({
       patientId,
       weekNumber,
       sessionAttemptNumber,
-      sessionDate: now.toISOString().split('T')[0],
-      sessionStartTime: now.toTimeString().split(' ')[0],
-      status: 'in_progress'
-    });
-    
-    // 7. Return session details
-    res.json({
-      status: 'success',
-      message: 'Session started successfully',
-      data: {
-        patientId,
-        weekNumber,
-        sessionNumber: sessionAttemptNumber,
-        sessionId: session.id,
-        sessionZones: zones,
-        sessionData: {
-          sessionDate: session.sessionDate,
-          sessionStartTime: session.sessionStartTime,
-          sessionDuration: `${zones.sessionDuration} mins`
-        },
-        instructions: {
-          warmup: `5 minutes - Keep HR between ${zones.warmupZoneMin}-${zones.warmupZoneMax} bpm`,
-          exercise: `${zones.sessionDuration - 10} minutes - Keep HR between ${zones.exerciseZoneMin}-${zones.exerciseZoneMax} bpm`,
-          cooldown: `5 minutes - Keep HR between ${zones.cooldownZoneMin}-${zones.cooldownZoneMax} bpm`
-        }
-      }
-    });
-    
-  } catch (error) {
-    console.error('[SessionController] Error starting session:', error);
-    res.status(500).json({
-      status: 'failure',
-      message: 'Internal server error'
-    });
-  }
-};
-
-// ========================================
-// END SESSION
-// ========================================
-export const endSession = async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    
-    // 1. Get session
-    const session = await Session.findByPk(sessionId);
-    if (!session) {
-      return res.status(404).json({
-        status: 'failure',
-        message: 'Session not found'
-      });
-    }
-    
-    if (session.status !== 'in_progress') {
-      return res.status(400).json({
-        status: 'failure',
-        message: 'Session already ended or not started'
-      });
-    }
-    
-    // 2. Get user
-    const user = await User.findByPk(session.patientId);
-    
-    // 3. Generate retry schedule
-    const sessionStartDateTime = new Date(`${session.sessionDate}T${session.sessionStartTime}`);
-    const retrySchedule = generateRetrySchedule(sessionStartDateTime);
-    
-    // 4. Update session to processing status
-    await session.update({
+      sessionType: 'complete',
+      sessionDate: startTime.toISOString().split('T')[0],
+      sessionStartTime: startTime.toTimeString().split(' ')[0],
+      sessionEndTime: endTime.toTimeString().split(' ')[0],
+      sessionDuration: durationMinutes,
+      actualDuration: durationMinutes,
+      targetHR: rehabPlan.targetHR,
+      maxPermissibleHR: rehabPlan.maxPermissibleHR,
+      warmupZoneMin: rehabPlan.warmupZoneMin,
+      warmupZoneMax: rehabPlan.warmupZoneMax,
+      exerciseZoneMin: rehabPlan.exerciseZoneMin,
+      exerciseZoneMax: rehabPlan.exerciseZoneMax,
+      cooldownZoneMin: rehabPlan.cooldownZoneMin,
+      cooldownZoneMax: rehabPlan.cooldownZoneMax,
       status: 'processing',
       attemptCount: 0,
       retrySchedule: retrySchedule,
-      nextAttemptAt: calculateNextAttemptTime(sessionStartDateTime, 1) // Attempt 1 is immediate
+      processingStartsAt: processingStartTime,
+      nextAttemptAt: processingStartTime
     });
-    
-    // 5. Try immediate processing (Attempt #1)
-    console.log(`[SessionController] Starting immediate processing for session ${sessionId}`);
-    processSessionAttempt(sessionId).catch(error => {
-      console.error(`[SessionController] Error in immediate processing:`, error);
+
+    console.log(`[IndependentExercise] Created session ${session.id} (type: complete), processing starts at ${processingStartTime.toISOString()}`);
+
+    // Return 202 Accepted - processing will happen asynchronously
+    return res.status(202).json({
+      status: 'accepted',
+      message: 'Independent exercise session created and queued for processing',
+      sessionId: session.id,
+      estimatedCompletion: processingStartTime.toISOString(),
+      pollingUrl: `/api/sessions/getIndependentExerciseResult/${session.id}`
     });
-    
-    // 6. Return immediate response
-    res.json({
-      status: 'success',
-      message: 'Session ended. Processing heart rate data...',
-      data: {
-        sessionId,
-        status: 'processing',
-        estimatedTime: '2-5 minutes',
-        checkStatusUrl: `/api/getSessionStatus/${sessionId}`
-      }
-    });
-    
+
   } catch (error) {
-    console.error('[SessionController] Error ending session:', error);
-    res.status(500).json({
+    console.error('[IndependentExercise] Error:', error);
+    return res.status(500).json({
+      status: 'failure',
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// ========================================
+// GET INDEPENDENT EXERCISE RESULT
+// ========================================
+export const getIndependentExerciseResult = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    if (!sessionId) {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'sessionId is required'
+      });
+    }
+
+    const session = await Session.findByPk(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        status: 'failure',
+        message: 'Session not found'
+      });
+    }
+
+    // Check status
+    if (session.status === 'processing') {
+      return res.status(202).json({
+        status: 'processing',
+        message: 'Session data still being processed',
+        estimatedCompletion: session.nextAttemptAt,
+        attemptCount: session.attemptCount
+      });
+    }
+
+    if (session.status === 'data_unavailable' || session.status === 'failed') {
+      return res.status(200).json({
+        status: 'failed',
+        message: session.failureReason || 'Failed to process session data',
+        sessionId: session.id
+      });
+    }
+
+    if (session.status === 'completed') {
+      // Return completed results
+      return res.status(200).json({
+        status: 'success',
+        data: {
+          patientId: parseInt(session.patientId),
+          sessionType: session.sessionType,
+          weekNumber: session.weekNumber,
+          sessionAttemptNumber: session.sessionAttemptNumber,
+          sessionStartTime: `${session.sessionDate}T${session.sessionStartTime}`,
+          sessionEndTime: `${session.sessionDate}T${session.sessionEndTime}`,
+          durationMinutes: session.actualDuration || session.sessionDuration,
+          dataCompleteness: Math.round(session.dataCompleteness * 100),
+          scores: {
+            warmupScore: session.warmupScore,
+            exerciseScore: session.exerciseScore,
+            cooldownScore: session.cooldownScore,
+            overallScore: session.overallScore,
+            riskLevel: session.riskLevel
+          },
+          heartRate: {
+            max: session.maxHR,
+            min: session.minHR,
+            avg: session.avgHR
+          },
+          zones: {
+            warmup: {
+              min: session.warmupZoneMin,
+              max: session.warmupZoneMax
+            },
+            exercise: {
+              min: session.exerciseZoneMin,
+              max: session.exerciseZoneMax
+            },
+            cooldown: {
+              min: session.cooldownZoneMin,
+              max: session.cooldownZoneMax
+            }
+          },
+          summary: session.summary
+        }
+      });
+    }
+
+    return res.status(400).json({
+      status: 'failure',
+      message: 'Invalid session status'
+    });
+
+  } catch (error) {
+    console.error('[getIndependentExerciseResult] Error:', error);
+    return res.status(500).json({
       status: 'failure',
       message: 'Internal server error'
     });
   }
 };
 
-// ========================================
-// PROCESS SESSION ATTEMPT (Internal function)
-// ========================================
-const processSessionAttempt = async (sessionId) => {
-  let session = null;
-  let lockAcquired = false;
-  
+export const submitRiskAnalysis = async (req, res) => {
   try {
-    // 1. Get session
-    session = await Session.findByPk(sessionId);
-    if (!session) {
-      console.error(`[ProcessSession] Session ${sessionId} not found`);
-      return;
-    }
-    
-    const attemptNumber = session.attemptCount + 1;
-    console.log(`[ProcessSession] Session ${sessionId} - Attempt #${attemptNumber}`);
-    
-    // 2. Try to acquire token lock
-    const lockedBy = `session_${sessionId}`;
-    lockAcquired = await acquireTokenLock(session.patientId, lockedBy);
-    
-    if (!lockAcquired) {
-      console.log(`[ProcessSession] Session ${sessionId} - Could not acquire token lock, will retry later`);
-      // Schedule next attempt
-      await scheduleNextAttempt(session, attemptNumber, {
-        result: 'token_busy',
-        dataPoints: 0,
-        errorMessage: 'Token in use by another process'
-      });
-      return;
-    }
-    
-    // 3. Get user and zones
-    const user = await User.findByPk(session.patientId);
-    const zones = calculateHeartRateZones(user.age, user.betaBlockers, user.lowEF, session.weekNumber);
-    
-    // 4. Get valid token (refreshes if needed)
-    const accessToken = await getValidToken(session.patientId);
-    
-    // 5. Calculate time range for data fetch
-    const sessionStartTime = new Date(`${session.sessionDate}T${session.sessionStartTime}`);
-    const sessionEndTime = new Date(sessionStartTime.getTime() + zones.sessionDuration * 60 * 1000);
-    
-    // 6. Fetch HR data from Google Fit
-    console.log(`[ProcessSession] Session ${sessionId} - Fetching data from Google Fit...`);
-    const hrData = await fetchGoogleFitData(accessToken, sessionStartTime, sessionEndTime);
-    
-    // 7. Validate data quality
-    const dataValidation = validateDataQuality(hrData, zones.sessionDuration);
-    console.log(`[ProcessSession] Session ${sessionId} - Data completeness: ${dataValidation.completeness}%`);
-    
-    // 8. Check if data is sufficient
-    if (!dataValidation.isSufficient) {
-      console.log(`[ProcessSession] Session ${sessionId} - Insufficient data (${dataValidation.actualDataPoints}/${dataValidation.expectedDataPoints})`);
-      
-      // Update retry schedule and schedule next attempt
-      await scheduleNextAttempt(session, attemptNumber, {
-        result: 'insufficient_data',
-        dataPoints: dataValidation.actualDataPoints,
-        errorMessage: `Only ${dataValidation.completeness}% data available`
-      });
-      
-      return;
-    }
-    
-    // 9. Data is sufficient! Process it
-    console.log(`[ProcessSession] Session ${sessionId} - Processing data...`);
-    
-    // Store raw HR data in HistoricalHRData table
-    const hrRecords = formatHRDataForStorage(hrData, session.patientId, session.sessionDate);
-    await HistoricalHRData.bulkCreate(hrRecords, { ignoreDuplicates: true });
-    
-    // Calculate scores
-    const scores = calculateSessionScore(hrData, zones, zones.sessionDuration);
-    const sessionRiskScore = scores.overallScore;
-    const riskLevel = determineRiskLevel(sessionRiskScore);
-    
-    // Calculate HR statistics
-    const hrValues = extractHRValues(hrData);
-    const hrStats = calculateHRStats(hrValues);
-    
-    // Generate summary
-    const summary = generateSessionSummary(riskLevel, sessionRiskScore, zones, hrStats);
-    
-    // Update retry schedule with success
-    const updatedSchedule = updateRetryScheduleItem(session.retrySchedule, attemptNumber, {
-      result: 'success',
-      dataPoints: dataValidation.actualDataPoints
-    });
-    
-    // 10. Update session as completed
-    await session.update({
-      sessionDuration: `${zones.sessionDuration} mins`,
-      sessionRiskScore,
-      riskLevel,
-      maxHR: hrStats.maxHR,
-      minHR: hrStats.minHR,
-      avgHR: hrStats.avgHR,
-      status: 'completed',
-      summary,
-      attemptCount: attemptNumber,
-      retrySchedule: updatedSchedule,
-      lastAttemptAt: new Date()
-    });
-    
-    // 11. Update weekly scores
-    await updateWeeklyScores(session.patientId, session.weekNumber);
-    
-    console.log(`[ProcessSession] Session ${sessionId} - ✓ Completed successfully!`);
-    
-  } catch (error) {
-    console.error(`[ProcessSession] Session ${sessionId} - Error:`, error);
-    
-    // Update retry schedule with error
-    if (session) {
-      const attemptNumber = session.attemptCount + 1;
-      await scheduleNextAttempt(session, attemptNumber, {
-        result: 'error',
-        dataPoints: 0,
-        errorMessage: error.message
-      });
-    }
-    
-  } finally {
-    // Always release lock
-    if (lockAcquired && session) {
-      await releaseTokenLock(session.patientId);
-    }
-  }
-};
+    const { patientId, sessionId } = req.body; // or req.query
 
-// ========================================
-// SCHEDULE NEXT ATTEMPT (Helper function)
-// ========================================
-const scheduleNextAttempt = async (session, attemptNumber, result) => {
-  try {
-    // Update retry schedule with this attempt's result
-    const updatedSchedule = updateRetryScheduleItem(session.retrySchedule, attemptNumber, result);
+    let session;
     
-    // Check if there are more attempts
-    const nextPending = getNextPendingAttempt(updatedSchedule);
-    
-    if (!nextPending) {
-      // No more attempts - mark as failed
-      await session.update({
-        status: 'data_unavailable',
-        attemptCount: attemptNumber,
-        retrySchedule: updatedSchedule,
-        lastAttemptAt: new Date(),
-        failureReason: 'All retry attempts exhausted without sufficient data'
+    if (sessionId) {
+      // Find specific session by ID
+      session = await Session.findByPk(sessionId);
+    } else if (patientId) {
+      // Find latest session for patient
+      session = await Session.findOne({
+        where: { patientId },
+        order: [['createdAt', 'DESC']]
       });
-      console.log(`[ScheduleNext] Session ${session.id} - All attempts exhausted`);
-      return;
+    } else {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'patientId or sessionId required'
+      });
     }
     
-    // Schedule next attempt
-    const sessionStartDateTime = new Date(`${session.sessionDate}T${session.sessionStartTime}`);
-    const nextAttemptTime = calculateNextAttemptTime(sessionStartDateTime, nextPending.attempt);
-    
-    await session.update({
-      attemptCount: attemptNumber,
-      retrySchedule: updatedSchedule,
-      nextAttemptAt: nextAttemptTime,
-      lastAttemptAt: new Date()
-    });
-    
-    console.log(`[ScheduleNext] Session ${session.id} - Next attempt #${nextPending.attempt} scheduled for ${nextAttemptTime}`);
-    
-  } catch (error) {
-    console.error(`[ScheduleNext] Error scheduling next attempt:`, error);
-  }
-};
-
-// ========================================
-// GET SESSION STATUS
-// ========================================
-export const getSessionStatus = async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    
-    const session = await Session.findByPk(sessionId);
     if (!session) {
       return res.status(404).json({
         status: 'failure',
@@ -366,132 +528,82 @@ export const getSessionStatus = async (req, res) => {
       });
     }
     
-    // If still processing
+    // Check status
     if (session.status === 'processing') {
-      return res.json({
+      return res.status(202).json({ // 202 = Accepted but not ready
         status: 'processing',
-        message: 'Still processing heart rate data...',
-        data: {
-          sessionId: session.id,
-          attemptCount: session.attemptCount,
-          nextAttemptAt: session.nextAttemptAt,
-          retrySchedule: session.retrySchedule
-        }
+        message: 'Session data still being processed',
+        estimatedCompletion: session.nextAttemptAt,
+        attemptCount: session.attemptCount
       });
     }
     
-    // If failed or data unavailable
-    if (session.status === 'failed' || session.status === 'data_unavailable') {
-      return res.json({
+    if (session.status === 'data_unavailable' || session.status === 'failed') {
+      return res.status(200).json({
         status: 'failed',
-        message: session.failureReason || 'Session processing failed',
-        data: {
-          sessionId: session.id,
-          attemptCount: session.attemptCount,
-          retrySchedule: session.retrySchedule
-        }
+        message: session.failureReason || 'Failed to process session data',
+        sessionId: session.id
       });
     }
     
-    // If completed
     if (session.status === 'completed') {
-      const user = await User.findByPk(session.patientId);
-      const zones = calculateHeartRateZones(user.age, user.betaBlockers, user.lowEF, session.weekNumber);
-      
+      // Get weekly score
       const weeklyScore = await WeeklyScore.findOne({
         where: {
           patientId: session.patientId,
           weekNumber: session.weekNumber
         }
       });
-      
-      return res.json({
+
+      // Prepare data
+      const hrData = {
+        maxHR: session.maxHR,
+        minHR: session.minHR,
+        avgHR: session.avgHR
+      };
+
+      const scores = {
+        sessionRiskScore: parseFloat(session.sessionRiskScore) || 0,
+        sessionRiskLevel: session.sessionRiskLevel || 'Low',
+        cumulativeRiskScore: weeklyScore?.weeklyScore || parseFloat(session.sessionRiskScore) || 0,
+        riskLevel: session.riskLevel || 'Low',
+        baselineScore: parseFloat(session.baselineScore) || 0,
+        summary: session.summary || 'Session completed successfully'
+      };
+
+      const zones = {
+        targetHR: session.targetHR,
+        maxPermissibleHR: session.maxPermissibleHR,
+        warmupZoneMin: session.warmupZoneMin,
+        warmupZoneMax: session.warmupZoneMax,
+        exerciseZoneMin: session.exerciseZoneMin,
+        exerciseZoneMax: session.exerciseZoneMax,
+        cooldownZoneMin: session.cooldownZoneMin,
+        cooldownZoneMax: session.cooldownZoneMax,
+        sessionDuration: session.sessionDuration
+      };
+
+      // Format for Spectrum (includes dataCompleteness)
+      const result = formatForSpectrum(session, hrData, scores, zones);
+
+      return res.status(200).json({
         status: 'success',
-        message: 'Session completed successfully',
-        data: {
-          patientId: session.patientId,
-          weekNumber: session.weekNumber,
-          sessionNumber: session.sessionAttemptNumber,
-          sessionRiskScore: parseFloat(session.sessionRiskScore),
-          cumulativeRiskScore: weeklyScore?.weeklyScore || session.sessionRiskScore,
-          riskLevel: session.riskLevel,
-          summary: session.summary,
-          sessionData: {
-            sessionDate: session.sessionDate,
-            sessionStartTime: session.sessionStartTime,
-            sessionDuration: session.sessionDuration,
-            MaxHR: session.maxHR,
-            MinHR: session.minHR,
-            AvgHR: session.avgHR
-          },
-          sessionZones: zones
-        }
+        data: result
       });
     }
     
-    // Unknown status
-    return res.json({
-      status: 'unknown',
-      message: 'Session status unclear',
-      sessionStatus: session.status
+    return res.status(400).json({
+      status: 'failure',
+      message: 'Invalid session status'
     });
     
   } catch (error) {
-    console.error('[SessionController] Error getting session status:', error);
-    res.status(500).json({
+    console.error('[submitRiskAnalysis] Error:', error);
+    return res.status(500).json({
       status: 'failure',
       message: 'Internal server error'
     });
   }
 };
 
-// ========================================
-// UPDATE WEEKLY SCORES (Helper function)
-// ========================================
-const updateWeeklyScores = async (patientId, weekNumber) => {
-  try {
-    // Get all completed sessions for this week
-    const sessions = await Session.findAll({
-      where: {
-        patientId,
-        weekNumber,
-        status: 'completed',
-        sessionRiskScore: { [Op.not]: null }
-      },
-      order: [['sessionRiskScore', 'DESC']]
-    });
-    
-    // Mark all as not counted first
-    await Session.update(
-      { isCountedInWeekly: false },
-      { where: { patientId, weekNumber } }
-    );
-    
-    // Select top 3
-    const topThree = sessions.slice(0, 3);
-    
-    if (topThree.length === 0) return;
-    
-    // Mark top 3 as counted
-    await Session.update(
-      { isCountedInWeekly: true },
-      { where: { id: topThree.map(s => s.id) } }
-    );
-    
-    // Calculate weekly score (average of top 3)
-    const weeklyScore = topThree.reduce((sum, s) => sum + parseFloat(s.sessionRiskScore), 0) / topThree.length;
-    
-    // Upsert weekly score
-    await WeeklyScore.upsert({
-      patientId,
-      weekNumber,
-      weeklyScore: weeklyScore.toFixed(2),
-      cumulativeScore: weeklyScore.toFixed(2) // Simplified
-    });
-    
-    console.log(`[UpdateWeeklyScores] Updated weekly score for ${patientId}, week ${weekNumber}: ${weeklyScore.toFixed(2)}`);
-    
-  } catch (error) {
-    console.error('[UpdateWeeklyScores] Error:', error);
-  }
-};
+

@@ -3,22 +3,35 @@ import cors from 'cors';
 import helmet from 'helmet';
 import 'dotenv/config';
 import sequelize from './database/db.js';
+import morgan from 'morgan';  // Add this
 import patientRoutes from './routes/patients.js';
 import sessionRoutes from './routes/sessionRoutes.js';
+import historicalRoutes from './routes/historicalRoutes.js'
 import { startRetryWorker } from './workers/retryWorker.js';
 import { startHistoricalSync } from './jobs/historicalSync.js'; // ADD THIS LINE
-
+import testRoutes from './routes/test.js';  // Add this import
+import authRoutes from './routes/auth.js';  // Add this import
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT ;
+// Request logging - Add this before routes
+if (process.env.NODE_ENV === 'production') {
+  app.use(morgan('combined')); // Detailed logs for production
+} else {
+  app.use(morgan('dev')); // Colored, concise logs for development
+}
 
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-
+app.use('/api/auth', authRoutes); 
 // Routes
 app.use('/api', patientRoutes);
 app.use('/api', sessionRoutes);
+app.use('/api/test', testRoutes); 
+app.use('/api/patients',historicalRoutes)
+
+
 
 // Basic test route
 app.get('/', (req, res) => {
@@ -39,21 +52,14 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
+
 
 // Start server and sync database
 const startServer = async () => {
   try {
     // Import models to ensure associations are loaded
-    const { User, PatientVital, RehabPlan, GoogleToken, Session, WeeklyScore, HistoricalHRData } = await import('./models/index.js');
-    
+    const { User, PatientVital, RehabPlan, GoogleToken, Session, WeeklyScore, HistoricalHRData, BaselineThreshold } = await import('./models/index.js');
+
     // Sync models in order (parent tables first)
     await User.sync({ alter: true });
     await PatientVital.sync({ alter: true });
@@ -62,7 +68,8 @@ const startServer = async () => {
     await Session.sync({ alter: true });
     await WeeklyScore.sync({ alter: true });
     await HistoricalHRData.sync({ alter: true });
-    
+    await BaselineThreshold.sync({ alter: true });
+
     console.log('✓ Database synced successfully');
     
     // Start retry worker for background session processing
@@ -73,7 +80,7 @@ const startServer = async () => {
     startHistoricalSync(); // ADD THIS LINE
     console.log('✓ Historical sync scheduled');
         
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`✓ Server running on port ${PORT}`);
       console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`✓ API Base URL: http://localhost:${PORT}/api`);

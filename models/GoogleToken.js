@@ -29,6 +29,32 @@ const GoogleToken = sequelize.define('GoogleToken', {
   },
   scope: {
     type: DataTypes.JSON
+  },  // NEW FIELDS FOR TOKEN HEALTH
+  tokenStatus: {
+    type: DataTypes.ENUM('valid', 'invalid', 'revoked'),
+    field: 'token_status',
+    defaultValue: 'valid',
+    allowNull: false
+  },
+  invalidatedAt: {
+    type: DataTypes.DATE,
+    field: 'invalidated_at',
+    allowNull: true
+  },
+  invalidationReason: {
+    type: DataTypes.TEXT,
+    field: 'invalidation_reason',
+    allowNull: true
+  },
+  lastHealthCheck: {
+    type: DataTypes.DATE,
+    field: 'last_health_check',
+    allowNull: true
+  },
+  reconnectNotifiedAt: {
+    type: DataTypes.DATE,
+    field: 'reconnect_notified_at',
+    allowNull: true
   },
   // NEW FIELDS BELOW
   tokenInUse: {

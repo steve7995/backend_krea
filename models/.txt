@@ -1,0 +1,714 @@
+    import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const BaselineThreshold = sequelize.define('BaselineThreshold', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  patientId: {
+    type: DataTypes.STRING(50),
+    field: 'patient_id',
+    allowNull: false
+  },
+  calculatedAtSession: {
+    type: DataTypes.INTEGER,
+    field: 'calculated_at_session',
+    allowNull: false,
+    comment: 'Session number when baseline was calculated (3, 7, or 14)'
+  },
+  baselineScore: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'baseline_score',
+    allowNull: false
+  },
+  standardDeviation: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'standard_deviation',
+    allowNull: false
+  },
+  thresholdMinus2SD: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'threshold_minus_2sd',
+    allowNull: false
+  },
+  thresholdMinus1SD: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'threshold_minus_1sd',
+    allowNull: false
+  },
+  thresholdPlus1SD: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'threshold_plus_1sd',
+    allowNull: false
+  },
+  thresholdPlus2SD: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'threshold_plus_2sd',
+    allowNull: false
+  }
+  ,
+  restingHeartRate: {
+  type: DataTypes.DECIMAL(5,2),
+  field: 'resting_heart_rate',
+  allowNull: true
+}
+}, {
+  tableName: 'baseline_thresholds',
+  underscored: true,
+  indexes: [
+    {
+      fields: ['patient_id', 'calculated_at_session']
+    }
+  ]
+});
+
+export default BaselineThreshold;
+import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const GoogleToken = sequelize.define('GoogleToken', {
+  patientId: {
+    type: DataTypes.STRING(50),
+    primaryKey: true,
+    field: 'patient_id',
+    references: {
+      model: 'users',
+      key: 'patient_id'
+    }
+  },
+  accessToken: {
+    type: DataTypes.TEXT,
+    field: 'access_token'
+  },
+  refreshToken: {
+    type: DataTypes.TEXT,
+    field: 'refresh_token'
+  },
+  expiresAt: {
+    type: DataTypes.BIGINT,
+    field: 'expires_at'
+  },
+  tokenType: {
+    type: DataTypes.STRING,
+    field: 'token_type'
+  },
+  scope: {
+    type: DataTypes.JSON
+  },  // NEW FIELDS FOR TOKEN HEALTH
+  tokenStatus: {
+    type: DataTypes.ENUM('valid', 'invalid', 'revoked'),
+    field: 'token_status',
+    defaultValue: 'valid',
+    allowNull: false
+  },
+  invalidatedAt: {
+    type: DataTypes.DATE,
+    field: 'invalidated_at',
+    allowNull: true
+  },
+  invalidationReason: {
+    type: DataTypes.TEXT,
+    field: 'invalidation_reason',
+    allowNull: true
+  },
+  lastHealthCheck: {
+    type: DataTypes.DATE,
+    field: 'last_health_check',
+    allowNull: true
+  },
+  reconnectNotifiedAt: {
+    type: DataTypes.DATE,
+    field: 'reconnect_notified_at',
+    allowNull: true
+  },
+  // NEW FIELDS BELOW
+  tokenInUse: {
+    type: DataTypes.BOOLEAN,
+    field: 'token_in_use',
+    defaultValue: false
+  },
+  tokenLockedBy: {
+    type: DataTypes.STRING(100),
+    field: 'token_locked_by',
+    allowNull: true
+  },
+  tokenLockedAt: {
+    type: DataTypes.DATE,
+    field: 'token_locked_at',
+    allowNull: true
+  },
+  lastUsedAt: {
+    type: DataTypes.DATE,
+    field: 'last_used_at',
+    allowNull: true
+  }
+}, {
+  tableName: 'google_tokens',
+  underscored: true,
+  indexes: [
+    {
+      fields: ['token_in_use', 'token_locked_at']  // NEW INDEX for checking locks
+    }
+  ]
+});
+
+export default GoogleToken;import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const HistoricalHRData = sequelize.define('HistoricalHRData', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  patientId: {
+    type: DataTypes.STRING(50),
+    field: 'patient_id',
+    allowNull: false
+  },
+  recordedDate: {
+    type: DataTypes.DATEONLY,
+    field: 'recorded_date',
+    allowNull: false
+  },
+  recordedTime: {
+    type: DataTypes.TIME,
+    field: 'recorded_time',
+    allowNull: false
+  },
+  heartRate: {
+    type: DataTypes.INTEGER,
+    field: 'heart_rate',
+    allowNull: false,
+    validate: {
+      min: 30,
+      max: 250
+    }
+  },
+  activityType: {
+    type: DataTypes.ENUM('rest', 'exercise', 'sleep', 'unknown'),
+    field: 'activity_type',
+    defaultValue: 'unknown'
+  },
+  dataSource: {
+    type: DataTypes.STRING(50),
+    field: 'data_source',
+    defaultValue: 'google_fit'
+  },
+  isImputed: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_imputed',
+    defaultValue: false,
+    allowNull: false
+  }
+}, {
+  tableName: 'historical_hr_data',
+  underscored: true,
+  indexes: [
+    {
+      fields: ['patient_id', 'recorded_date']
+    },
+    {
+      fields: ['patient_id', 'recorded_date', 'recorded_time']
+    }
+  ]
+});
+
+export default HistoricalHRData;import User from './User.js';
+import PatientVital from './PatientVital.js';
+import RehabPlan from './RehabPlan.js';
+import GoogleToken from './GoogleToken.js';
+import Session from './Session.js';
+import WeeklyScore from './WeeklyScore.js';
+import HistoricalHRData from './HistoricalHRData.js';
+import BaselineThreshold from './BaselineThreshold.js';
+
+// Define relationships
+User.hasOne(PatientVital, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+User.hasMany(RehabPlan, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+User.hasOne(GoogleToken, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+User.hasMany(Session, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+User.hasMany(WeeklyScore, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+User.hasMany(HistoricalHRData, { 
+  foreignKey: 'patientId',
+  sourceKey: 'patientId'
+});
+
+PatientVital.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+RehabPlan.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+GoogleToken.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+Session.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+WeeklyScore.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+HistoricalHRData.belongsTo(User, { 
+  foreignKey: 'patientId',
+  targetKey: 'patientId'
+});
+User.hasMany(BaselineThreshold, { foreignKey: 'patientId' });
+BaselineThreshold.belongsTo(User, { foreignKey: 'patientId' });
+export { User, PatientVital, RehabPlan, GoogleToken, Session, WeeklyScore, HistoricalHRData,BaselineThreshold   };import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const PatientVital = sequelize.define('PatientVital', {
+patientId: {
+  type: DataTypes.STRING(50),
+  primaryKey: true,
+  field: 'patient_id',
+  references: {
+    model: 'users',
+    key: 'patient_id'
+  }
+},
+  systolic: DataTypes.INTEGER,
+  diastolic: DataTypes.INTEGER,
+  bloodGlucose: {
+    type: DataTypes.STRING(20),
+    field: 'blood_glucose'
+  },
+  spo2: DataTypes.INTEGER,
+  temperature: DataTypes.DECIMAL(4,1),
+  height: DataTypes.DECIMAL(5,1),
+  weight: DataTypes.DECIMAL(5,1),
+  cardiacCondition: {
+    type: DataTypes.ENUM('ACS', 'CSA', 'Valvular disorder', 'Others'),
+    field: 'cardiac_condition'
+  }
+}, {
+  tableName: 'patient_vitals',
+  underscored: true
+});
+
+export default PatientVital;import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const RehabPlan = sequelize.define('RehabPlan', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+patientId: {
+  type: DataTypes.STRING(50),
+  field: 'patient_id',
+  allowNull: false,
+  references: {
+    model: 'users',
+    key: 'patient_id'
+  }
+},
+  weekNumber: {
+    type: DataTypes.INTEGER,
+    field: 'week_number',
+    allowNull: false
+  },
+  targetHR: {
+    type: DataTypes.INTEGER,
+    field: 'target_hr'
+  },
+  maxPermissibleHR: {
+    type: DataTypes.INTEGER,
+    field: 'max_permissible_hr'
+  },
+  warmupZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'warmup_zone_min'
+  },
+  warmupZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'warmup_zone_max'
+  },
+  exerciseZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'exercise_zone_min'
+  },
+  exerciseZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'exercise_zone_max'
+  },
+  cooldownZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'cooldown_zone_min'
+  },
+  cooldownZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'cooldown_zone_max'
+  },
+  sessionDuration: {
+    type: DataTypes.INTEGER,
+    field: 'session_duration_minutes'
+  }
+}, {
+  tableName: 'rehab_plan',
+  underscored: true
+});
+
+export default RehabPlan;import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const Session = sequelize.define('Session', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  patientId: {
+    type: DataTypes.STRING(50),
+    field: 'patient_id',
+    allowNull: false
+  },
+  weekNumber: {
+    type: DataTypes.INTEGER,
+    field: 'week_number',
+    allowNull: false,
+    validate: {
+      min: 1,
+      max: 12
+    }
+  },
+  sessionAttemptNumber: {
+    type: DataTypes.INTEGER,
+    field: 'session_attempt_number',
+    allowNull: false,
+    validate: {
+      min: 1
+    }
+  },
+  sessionDate: {
+    type: DataTypes.DATEONLY,
+    field: 'session_date'
+  },
+  sessionStartTime: {
+    type: DataTypes.TIME,
+    field: 'session_start_time'
+  },
+  sessionEndTime: {
+    type: DataTypes.TIME,
+    field: 'session_end_time',
+    allowNull: true,
+    comment: 'Actual end time of session (for stop action)'
+  },
+  sessionDuration: {
+    type: DataTypes.INTEGER,
+    field: 'session_duration',
+    allowNull: true,
+    comment: 'Planned session duration in minutes from rehab plan'
+  },
+  actualDuration: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'actual_duration',
+    allowNull: true,
+    comment: 'Actual session duration in minutes (calculated from start/stop times)'
+  },
+  sessionRiskScore: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'session_risk_score'
+  },
+  baselineScore: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'baseline_score'
+  },
+  healthStatus: {
+  type: DataTypes.ENUM('at_risk', 'declining', 'consistent', 'improving', 'strong_improvement'),
+  field: 'health_status',
+  allowNull: true
+},sessionRiskLevel: {
+  type: DataTypes.ENUM('High', 'Moderate', 'Low'),
+  field: 'session_risk_level',
+  allowNull: true
+},
+  riskLevel: {
+    type: DataTypes.ENUM('High', 'Moderate', 'Low'),
+    field: 'risk_level'
+  },
+  maxHR: {
+    type: DataTypes.INTEGER,
+    field: 'max_hr'
+  },
+  minHR: {
+    type: DataTypes.INTEGER,
+    field: 'min_hr'
+  },
+  avgHR: {
+    type: DataTypes.INTEGER,
+    field: 'avg_hr'
+  },
+  // Heart Rate Zone Fields (from RehabPlan)
+  targetHR: {
+    type: DataTypes.INTEGER,
+    field: 'target_hr',
+    allowNull: true
+  },
+  maxPermissibleHR: {
+    type: DataTypes.INTEGER,
+    field: 'max_permissible_hr',
+    allowNull: true
+  },
+  warmupZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'warmup_zone_min',
+    allowNull: true
+  },
+  warmupZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'warmup_zone_max',
+    allowNull: true
+  },
+  exerciseZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'exercise_zone_min',
+    allowNull: true
+  },
+  exerciseZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'exercise_zone_max',
+    allowNull: true
+  },
+  cooldownZoneMin: {
+    type: DataTypes.INTEGER,
+    field: 'cooldown_zone_min',
+    allowNull: true
+  },
+  cooldownZoneMax: {
+    type: DataTypes.INTEGER,
+    field: 'cooldown_zone_max',
+    allowNull: true
+  },
+  isCountedInWeekly: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_counted_in_weekly',
+    defaultValue: false
+  },
+  summary: {
+    type: DataTypes.TEXT
+  },
+  status: {
+    type: DataTypes.ENUM('active', 'completed', 'missed', 'in_progress', 'processing', 'failed', 'data_unavailable', 'pending_sync', 'abandoned'),
+    field: 'status',
+    defaultValue: 'in_progress'
+  },sentToSpectrum: {
+  type: DataTypes.BOOLEAN,
+  field: 'sent_to_spectrum',
+  defaultValue: false
+},
+spectrumSentAt: {
+  type: DataTypes.DATE,
+  field: 'spectrum_sent_at',
+  allowNull: true
+},
+spectrumResponseStatus: {
+  type: DataTypes.STRING(20),
+  field: 'spectrum_response_status',
+  allowNull: true  // 'success' or 'failed'
+},
+vitalScore: {
+  type: DataTypes.DECIMAL(5,2),
+  field: 'vital_score',
+  allowNull: true
+},
+vitalRiskLevel: {
+  type: DataTypes.ENUM('High', 'Moderate', 'Low'),
+  field: 'vital_risk_level',
+  allowNull: true
+},
+  // NEW FIELDS BELOW
+  attemptCount: {
+    type: DataTypes.INTEGER,
+    field: 'attempt_count',
+    defaultValue: 0,
+    validate: {
+      min: 0,
+      max: 12
+    }
+  },
+  nextAttemptAt: {
+    type: DataTypes.DATE,
+    field: 'next_attempt_at',
+    allowNull: true
+  },
+  lastAttemptAt: {
+    type: DataTypes.DATE,
+    field: 'last_attempt_at',
+    allowNull: true
+  },
+  processingStartsAt: {
+  type: DataTypes.DATE,
+  field: 'processing_starts_at',
+  allowNull: true
+},
+  retrySchedule: {
+    type: DataTypes.JSON,
+    field: 'retry_schedule',
+    allowNull: true,
+    defaultValue: null
+  },
+  failureReason: {
+    type: DataTypes.TEXT,
+    field: 'failure_reason',
+    allowNull: true
+  }
+}, {
+  tableName: 'sessions',
+  underscored: true,
+  indexes: [
+    {
+      fields: ['patient_id', 'week_number']
+    },
+    {
+      fields: ['patient_id', 'week_number', 'session_attempt_number']
+    },
+    {
+      fields: ['status', 'next_attempt_at']  // NEW INDEX for retry worker efficiency
+    }
+  ]
+});
+
+export default Session;// import { DataTypes } from 'sequelize';
+// import sequelize from '../database/db.js';
+
+// const User = sequelize.define('User', {
+//   patientId: {
+//     type: DataTypes.STRING(50),
+//     primaryKey: true,
+//     field: 'patient_id'
+//   },
+//   age: {
+//     type: DataTypes.INTEGER,
+//     allowNull: true
+//   },
+//   betaBlockers: {
+//     type: DataTypes.BOOLEAN,
+//     field: 'beta_blockers',
+//      allowNull: true,
+//     defaultValue: false
+//   },
+//   lowEF: {
+//     type: DataTypes.BOOLEAN,
+//     field: 'low_ef',
+//      allowNull: true,
+//     defaultValue: false
+//   },
+//   regime: {
+//     type: DataTypes.INTEGER,
+//     allowNull: true,
+//    isIn: {
+//         args: [[6, 12]],  // ← Fixed: wrap in args
+//         msg: 'Regime must be either 6 or 12'
+//       }
+//   }
+// }, {
+//   tableName: 'users',
+//   underscored: true
+// });
+
+// export default User;
+
+import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const User = sequelize.define('User', {
+  patientId: {
+    type: DataTypes.STRING(50),
+    primaryKey: true,
+    field: 'patient_id'
+  },
+  age: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  betaBlockers: {
+    type: DataTypes.BOOLEAN,
+    field: 'beta_blockers',
+    allowNull: true,
+    defaultValue: false
+  },
+  lowEF: {
+    type: DataTypes.BOOLEAN,
+    field: 'low_ef',
+    allowNull: true,
+    defaultValue: false
+  },
+  regime: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    validate: {
+      isIn: {
+        args: [[6, 12]],  // ← Fixed: wrap in args
+        msg: 'Regime must be either 6 or 12'
+      }
+    }
+  }
+}, {
+  tableName: 'users',
+  underscored: true
+});
+
+export default User;import { DataTypes } from 'sequelize';
+import sequelize from '../database/db.js';
+
+const WeeklyScore = sequelize.define('WeeklyScore', {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    autoIncrement: true
+  },
+  patientId: {
+    type: DataTypes.STRING(50),
+    field: 'patient_id',
+    allowNull: false
+  },
+  weekNumber: {
+    type: DataTypes.INTEGER,
+    field: 'week_number',
+    allowNull: false
+  },
+  weeklyScore: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'weekly_score'
+  },
+  cumulativeScore: {
+    type: DataTypes.DECIMAL(5,2),
+    field: 'cumulative_score'
+  }
+}, {
+  tableName: 'weekly_scores',
+  underscored: true,
+  indexes: [
+    {
+      unique: true,
+      fields: ['patient_id', 'week_number']
+    }
+  ]
+});
+
+export default WeeklyScore;

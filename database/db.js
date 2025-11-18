@@ -1,20 +1,16 @@
-import 'dotenv/config'
 
-// Debug to verify
-console.log('Environment loaded:');
-console.log('DB_NAME:', process.env.DB_NAME);
-console.log('DB_USER:', process.env.DB_USER);
+
 import { Sequelize } from 'sequelize';
 
 const sequelize = new Sequelize(
-  'rehab',
-  'root', 
-  '7995',
+  process.env.DB_NAME,
+  process.env.DB_USER, 
+  process.env.DB_PASSWORD,
   {
-    host: 'localhost',
-    port: 3306,
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT),
     dialect: 'mysql',
-    logging: false // set to console.log to see SQL queries
+    logging: false
   }
 );
 

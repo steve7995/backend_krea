@@ -5,6 +5,7 @@ import GoogleToken from './GoogleToken.js';
 import Session from './Session.js';
 import WeeklyScore from './WeeklyScore.js';
 import HistoricalHRData from './HistoricalHRData.js';
+import BaselineThreshold from './BaselineThreshold.js';
 
 // Define relationships
 User.hasOne(PatientVital, { 
@@ -56,5 +57,7 @@ HistoricalHRData.belongsTo(User, {
   foreignKey: 'patientId',
   targetKey: 'patientId'
 });
+User.hasMany(BaselineThreshold, { foreignKey: 'patientId' });
+BaselineThreshold.belongsTo(User, { foreignKey: 'patientId' });
 
-export { User, PatientVital, RehabPlan, GoogleToken, Session, WeeklyScore, HistoricalHRData };
+export { User, PatientVital, RehabPlan, GoogleToken, Session, WeeklyScore, HistoricalHRData, BaselineThreshold };

@@ -1,12 +1,28 @@
 // Get delay in milliseconds for each attempt number
 export const getNextAttemptDelay = (attemptNumber) => {
+  // const delays = {
+  //   1: 0,                    // Immediate (0 minutes)
+  //   2: 15 * 60 * 1000,       // 15 minutes
+  //   3: 30 * 60 * 1000,       // 30 minutes
+  //   4: 60 * 60 * 1000,       // 1 hour
+  //   5: 3 * 60 * 60 * 1000,   // 3 hours
+  //   6: 6 * 60 * 60 * 1000    // 6 hours
+  // };
+  
   const delays = {
-    1: 0,                    // Immediate (0 minutes)
-    2: 15 * 60 * 1000,       // 15 minutes
-    3: 30 * 60 * 1000,       // 30 minutes
-    4: 60 * 60 * 1000,       // 1 hour
-    5: 3 * 60 * 60 * 1000,   // 3 hours
-    6: 6 * 60 * 60 * 1000    // 6 hours
+    1: 0,                      // Immediate
+    // Fast checks (every 5 min)
+    2: 5 * 60 * 1000,          // 5 minutes
+    3: 5 * 60 * 1000,          // 5 minutes
+    4: 5 * 60 * 1000,          // 5 minutes
+    5: 5 * 60 * 1000,          // 5 minutes
+    6: 5 * 60 * 1000,          // 5 minutes
+    // Old schedule
+    7: 15 * 60 * 1000,         // 15 minutes
+    8: 30 * 60 * 1000,         // 30 minutes
+    9: 60 * 60 * 1000,         // 1 hour
+    10: 3 * 60 * 60 * 1000,    // 3 hours
+    11: 6 * 60 * 60 * 1000     // 6 hours
   };
   
   return delays[attemptNumber] || null;
@@ -44,7 +60,8 @@ export const shouldAttemptNow = (nextAttemptAt) => {
 export const generateRetrySchedule = (sessionStartTime) => {
   const schedule = [];
   
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  // before attempts <=6 increased to 11 due to new 5 min intervals too
+  for (let attempt = 1; attempt <= 11; attempt++) {
     const scheduledFor = calculateNextAttemptTime(sessionStartTime, attempt);
     
     schedule.push({
@@ -110,9 +127,10 @@ export const areAllAttemptsExhausted = (retrySchedule) => {
     return false;
   }
   
-  // Check if all 6 attempts are completed
+  // Check if all 6 attempts are completed but now 11
+  
   const completedAttempts = retrySchedule.filter(item => item.status === 'completed');
-  return completedAttempts.length >= 6;
+  return completedAttempts.length >= 11;
 };
 
 // Get data completeness percentage

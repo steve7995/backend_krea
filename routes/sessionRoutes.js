@@ -1,15 +1,22 @@
 import express from 'express';
-import { startSession, endSession, getSessionStatus } from '../controllers/sessionController.js';
+import { submitRiskAnalysis, capturePatientSessionTime, scoreIndependentExercise, getIndependentExerciseResult } from '../controllers/sessionController.js';
 
 const router = express.Router();
 
-// POST /api/startSession - Start a new workout session
-router.post('/startSession', startSession);
+// Capture session start time and create session record
+router.post('/capturePatientSessionTime', capturePatientSessionTime);
 
-// POST /api/endSession - End session and start background processing
-router.post('/endSession', endSession);
+// Get session stop time endpoint - REMOVED (functionality integrated into capturePatientSessionTime)
+// router.post('/getSessionStopTime', getSessionStopTime);
 
-// GET /api/getSessionStatus/:sessionId - Check session processing status
-router.get('/getSessionStatus/:sessionId', getSessionStatus);
+// Submit and retrieve risk analysis for a completed session
+router.post('/submitRiskAnalysis', submitRiskAnalysis);
+router.get('/submitRiskAnalysis/:patientId', submitRiskAnalysis); // Optional: GET version
+
+// Score independent exercise session (for Spectrum ad-hoc sessions)
+router.post('/scoreIndependentExercise', scoreIndependentExercise);
+
+// Get independent exercise result (polling endpoint)
+router.get('/getIndependentExerciseResult/:sessionId', getIndependentExerciseResult);
 
 export default router;

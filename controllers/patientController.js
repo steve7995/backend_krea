@@ -1,29 +1,62 @@
 import { User, PatientVital, RehabPlan, GoogleToken } from '../models/index.js';
 import { calculateHeartRateZones } from '../utils/calculations.js';
+import { syncSinglePatient } from '../jobs/historicalSync.js';
+import { getProcessedHistoricalHR } from '../utils/historicalHRProcessor.js';
+import { pushHistoricalHRToSpectrum } from '../utils/spectrumFormatter.js';
 
-// Register Google Account
+
 export const registerGoogleAccount = async (req, res) => {
   try {
     const { patientId, tokens } = req.body;
     
-    // Check if user exists
-    const user = await User.findByPk(patientId);
-    if (!user) {
-      return res.status(404).json({
+    if (!tokens || !tokens.access_token || !tokens.refresh_token) {
+      return res.status(400).json({
         status: 'failure',
-        message: 'Patient not found'
+        message: 'Valid tokens required'
       });
     }
     
-    // Store or update Google tokens
+    // Create user if doesn't exist
+    await User.findOrCreate({
+      where: { patientId },
+      defaults: {
+        patientId,
+        age: 0,
+        betaBlockers: false,
+        lowEF: false,
+        regime: 6
+      }
+    });
+    
+    // Store tokens and reset status flags
     await GoogleToken.upsert({
       patientId,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
-      expiresAt: tokens.expires_at,
-      tokenType: tokens.token_type,
-      scope: tokens.scope
+      expiresAt: tokens.expires_at || tokens.expiry_date || (Date.now() + 3600 * 1000),
+      tokenType: tokens.token_type || 'Bearer',
+      scope: tokens.scope,
+      // Reset status fields when new tokens are saved
+      tokenStatus: 'valid',
+      invalidatedAt: null,
+      invalidationReason: null,
+      reconnectNotifiedAt: null
     });
+    
+    // NEW: Trigger initial sync and push (async - don't wait)
+    console.log(`[OAuth] Triggering initial sync and push for patient ${patientId}`);
+    
+    syncSinglePatient(patientId)
+      .then(async () => {
+        console.log(`[OAuth] Sync complete, pushing to Spectrum for patient ${patientId}`);
+        const processedResult = await getProcessedHistoricalHR(patientId);
+        if (processedResult.data && processedResult.data.length > 0) {
+          await pushHistoricalHRToSpectrum(patientId, processedResult.data);
+        }
+      })
+      .catch(error => {
+        console.error(`[OAuth] Error in sync/push for patient ${patientId}:`, error);
+      });
     
     res.json({
       status: 'success',
@@ -38,8 +71,6 @@ export const registerGoogleAccount = async (req, res) => {
     });
   }
 };
-
-// Register/Update Patient Clinical Data
 export const registerPatientData = async (req, res) => {
   try {
     const {
@@ -48,27 +79,37 @@ export const registerPatientData = async (req, res) => {
       BB, LowEF, Regime
     } = req.body;
     
+    // Validate required fields
+    if (!patientId || !age || Regime === undefined) {
+      return res.status(400).json({
+        status: 'failure',
+        message: 'patientId, age, and Regime are required'
+      });
+    }
+    
     // Create or update user
     await User.upsert({
       patientId,
       age,
-      betaBlockers: BB,
-      lowEF: LowEF,
+      betaBlockers: BB !== undefined ? BB : false,
+      lowEF: LowEF !== undefined ? LowEF : false,
       regime: Regime
     });
     
-    // Create or update patient vitals
-    await PatientVital.upsert({
-      patientId,
-      systolic,
-      diastolic,
-      bloodGlucose,
-      spo2,
-      temperature,
-      height,
-      weight,
-      cardiacCondition
-    });
+    // Create or update patient vitals (if vitals data provided)
+    if (systolic || diastolic || bloodGlucose || spo2 || temperature || height || weight || cardiacCondition) {
+      await PatientVital.upsert({
+        patientId,
+        systolic,
+        diastolic,
+        bloodGlucose,
+        spo2,
+        temperature,
+        height,
+        weight,
+        cardiacCondition
+      });
+    }
     
     // Generate rehab plan for all weeks
     const rehabPlanData = [];

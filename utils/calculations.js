@@ -121,9 +121,9 @@ export const generateSessionSummary = (riskLevel, sessionScore, zones, hrStats) 
     summary += ` Warning: Maximum heart rate (${hrStats.maxHR} bpm) exceeded safe limit.`;
   }
   
-  if (sessionScore < 0.5) {
+  if (sessionScore < 50) {
     summary += ` Significant time spent outside target zones. Consider adjusting exercise intensity.`;
-  } else if (sessionScore >= 0.8) {
+  } else if (sessionScore >= 80) {
     summary += ` Excellent adherence to target heart rate zones!`;
   }
   

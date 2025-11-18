@@ -40,6 +40,12 @@ const HistoricalHRData = sequelize.define('HistoricalHRData', {
     type: DataTypes.STRING(50),
     field: 'data_source',
     defaultValue: 'google_fit'
+  },
+  isImputed: {
+    type: DataTypes.BOOLEAN,
+    field: 'is_imputed',
+    defaultValue: false,
+    allowNull: false
   }
 }, {
   tableName: 'historical_hr_data',

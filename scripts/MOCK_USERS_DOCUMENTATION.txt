@@ -1,0 +1,179 @@
+MOCK USER GROUPS - TEST DATA OVERVIEW
+================================================================================
+========
+
+GROUP A - BEST CASE
+--------------------------------------------------------------------------------
+Patient: Alex Johnson, Age 35
+Beta Blockers: No
+Low EF: No
+
+Session Progression:
+  Session 1: Score 85, Risk LOW, HR 115 bpm
+  Session 2: Score 88, Risk LOW, HR 114 bpm
+  Session 3: Score 90, Risk LOW, HR 113 bpm (Baseline: 87.7) [BASELINE ESTABLISHED]
+  Session 4: Score 91, Risk LOW, HR 112 bpm
+  Session 5: Score 92, Risk LOW, HR 111 bpm
+  Session 6: Score 94, Risk LOW, HR 109 bpm (Baseline: 92.3) [BASELINE UPDATED]
+
+Score Summary:
+  Session Scores:  [85, 88, 90, 91, 92, 94]
+  Baseline Scores: [--, --, 87.7, 87.7, 87.7, 92.3]
+  Combined Scores: [85, 88, 88.8, 89.3, 89.8, 93.2]
+  Resting HR:      [70, 70, 70, 70, 70, 64] bpm
+
+Overall Summary:
+  Improvement: +10.6%
+  Adherence: Excellent - consistently above baseline
+  Health Status: IMPROVING - Strong cardiovascular adaptation
+  Risk Trend: LOW and stable
+
+
+GROUP B - MODERATE+ CASE
+--------------------------------------------------------------------------------
+Patient: Maria Santos, Age 45
+Beta Blockers: No
+Low EF: No
+
+Session Progression:
+  Session 1: Score 68, Risk MODERATE, HR 120 bpm
+  Session 2: Score 70, Risk MODERATE, HR 119 bpm
+  Session 3: Score 72, Risk LOW, HR 118 bpm (Baseline: 70) [BASELINE ESTABLISHED]
+  Session 4: Score 73, Risk LOW, HR 117 bpm
+  Session 5: Score 74, Risk LOW, HR 116 bpm
+  Session 6: Score 76, Risk LOW, HR 115 bpm (Baseline: 74.3) [BASELINE UPDATED]
+
+Score Summary:
+  Session Scores:  [68, 70, 72, 73, 74, 76]
+  Baseline Scores: [--, --, 70, 70, 70, 74.3]
+  Combined Scores: [68, 70, 71, 71.5, 72, 75.2]
+  Resting HR:      [75, 75, 75, 75, 75, 72] bpm
+
+Overall Summary:
+  Improvement: +11.8%
+  Adherence: Excellent - consistently above baseline
+  Health Status: IMPROVING - Gradual cardiovascular adaptation
+  Risk Trend: Improving from MODERATE to LOW
+
+
+GROUP C - MODERATE- CASE
+--------------------------------------------------------------------------------
+Patient: Robert Chen, Age 58
+Beta Blockers: Yes
+Low EF: No
+
+Session Progression:
+  Session 1: Score 55, Risk MODERATE, HR 105 bpm
+  Session 2: Score 56, Risk MODERATE, HR 106 bpm
+  Session 3: Score 58, Risk MODERATE, HR 105 bpm (Baseline: 56.3) [BASELINE ESTABLISHED]
+  Session 4: Score 58, Risk MODERATE, HR 104 bpm
+  Session 5: Score 59, Risk MODERATE, HR 105 bpm
+  Session 6: Score 60, Risk MODERATE, HR 106 bpm (Baseline: 59) [BASELINE UPDATED]
+
+Score Summary:
+  Session Scores:  [55, 56, 58, 58, 59, 60]
+  Baseline Scores: [--, --, 56.3, 56.3, 56.3, 59]
+  Combined Scores: [55, 56, 57.2, 57.2, 57.7, 59.5]
+  Resting HR:      [79, 79, 79, 79, 79, 81] bpm
+
+Overall Summary:
+  Improvement: +9.1%
+  Adherence: Excellent - consistently above baseline
+  Health Status: STABLE - Minimal cardiovascular adaptation due to beta blockers
+  Risk Trend: MODERATE and stable
+
+
+GROUP D - WORST CASE
+--------------------------------------------------------------------------------
+Patient: Patricia Williams, Age 65
+Beta Blockers: Yes
+Low EF: Yes
+
+Session Progression:
+  Session 1: Score 42, Risk HIGH, HR 95 bpm
+  Session 2: Score 40, Risk HIGH, HR 96 bpm
+  Session 3: Score 38, Risk HIGH, HR 95 bpm (Baseline: 40) [BASELINE ESTABLISHED]
+  Session 4: Score 36, Risk HIGH, HR 97 bpm
+  Session 5: Score 35, Risk HIGH, HR 98 bpm
+  Session 6: Score 33, Risk HIGH, HR 100 bpm (Baseline: 34.7) [BASELINE UPDATED]
+
+Score Summary:
+  Session Scores:  [42, 40, 38, 36, 35, 33]
+  Baseline Scores: [--, --, 40, 40, 40, 34.7]
+  Combined Scores: [42, 40, 39, 38, 37.5, 33.8]
+  Resting HR:      [86, 86, 86, 86, 86, 91] bpm
+
+Overall Summary:
+  Improvement: -21.4%
+  Adherence: Poor - consistently below baseline
+  Health Status: DECLINING - Poor cardiovascular response despite exercise
+  Risk Trend: HIGH and worsening - requires medical review
+
+
+================================================================================
+HOW TO USE
+================================================================================
+
+SEED THE MOCK USERS:
+  npm run seed:mock
+  OR
+  node scripts/seedMockUsers.js
+
+VIEW THE MOCK USERS:
+  npm run view:mock
+  OR
+  node scripts/viewMockUsers.js
+
+
+================================================================================
+WHAT DATA IS CREATED
+================================================================================
+
+USERS TABLE:
+  - MOCK_ALEX_JOHNSON (Age 35, No beta blockers, No low EF)
+  - MOCK_MARIA_SANTOS (Age 45, No beta blockers, No low EF)
+  - MOCK_ROBERT_CHEN (Age 58, Beta blockers, No low EF)
+  - MOCK_PATRICIA_WILLIAMS (Age 65, Beta blockers, Low EF)
+
+SESSIONS TABLE:
+  - 24 total sessions (6 per user)
+  - Each session includes:
+    * Risk scores and levels
+    * Heart rate zones (warmup, exercise, cooldown)
+    * Session duration
+    * Health status
+    * Baseline scores (after session 3)
+
+BASELINE_THRESHOLDS TABLE:
+  - 8 baseline records (2 per user)
+  - Calculated at sessions 3 and 6
+  - Includes mean, standard deviation, and threshold bands
+  - Includes resting heart rate
+
+HISTORICAL_HR_DATA TABLE:
+  - ~540 heart rate data points total (~135 per user)
+  - Realistic patterns: warmup → exercise → cooldown
+  - One reading per minute of session
+
+
+================================================================================
+PATIENT IDS FOR TESTING
+================================================================================
+
+Best Case (Improving):       MOCK_ALEX_JOHNSON
+Moderate+ Case (Improving):  MOCK_MARIA_SANTOS
+Moderate- Case (Stable):     MOCK_ROBERT_CHEN
+Worst Case (Declining):      MOCK_PATRICIA_WILLIAMS
+
+
+================================================================================
+NOTES
+================================================================================
+
+- All mock users have 'MOCK_' prefix for easy identification
+- Running seed script again will clear and recreate all mock data
+- Heart rate data is algorithmically generated but realistic
+- Sessions are backdated by 1 week intervals
+- Baselines are automatically calculated at sessions 3 and 6
+- All data uses transaction safety (all-or-nothing)
+
