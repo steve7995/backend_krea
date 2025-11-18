@@ -59,11 +59,11 @@ export const shouldAttemptNow = (nextAttemptAt) => {
 // Generate complete retry schedule for a session
 export const generateRetrySchedule = (sessionStartTime) => {
   const schedule = [];
-  
+
   // before attempts <=6 increased to 11 due to new 5 min intervals too
   for (let attempt = 1; attempt <= 11; attempt++) {
     const scheduledFor = calculateNextAttemptTime(sessionStartTime, attempt);
-    
+
     schedule.push({
       attempt: attempt,
       scheduledFor: scheduledFor ? scheduledFor.toISOString() : null,
@@ -74,7 +74,38 @@ export const generateRetrySchedule = (sessionStartTime) => {
       errorMessage: null
     });
   }
-  
+
+  return schedule;
+};
+
+// Generate quick retry schedule for past independent sessions
+// Only 3 attempts with 5-minute intervals since data should already exist in Google Fit
+export const generateQuickRetrySchedule = (currentTime) => {
+  const now = new Date(currentTime);
+  const schedule = [];
+
+  // Quick schedule: 3 attempts only (data should already be synced to Google Fit)
+  const delays = [
+    0,                    // Attempt 1: Immediate
+    5 * 60 * 1000,       // Attempt 2: +5 minutes
+    10 * 60 * 1000       // Attempt 3: +10 minutes
+  ];
+
+  for (let i = 0; i < delays.length; i++) {
+    const attempt = i + 1;
+    const scheduledFor = new Date(now.getTime() + delays[i]);
+
+    schedule.push({
+      attempt: attempt,
+      scheduledFor: scheduledFor.toISOString(),
+      executedAt: null,
+      status: 'pending',
+      result: null,
+      dataPoints: null,
+      errorMessage: null
+    });
+  }
+
   return schedule;
 };
 

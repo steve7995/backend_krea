@@ -3,6 +3,7 @@ import { Op } from 'sequelize';
 import { calculateHeartRateZones } from '../utils/calculations.js';
 import {
   generateRetrySchedule,
+  generateQuickRetrySchedule,
   calculateNextAttemptTime,
   updateRetryScheduleItem,
   getNextPendingAttempt
@@ -346,12 +347,28 @@ export const scoreIndependentExercise = async (req, res) => {
 
     console.log(`[IndependentExercise] Session attempt number: ${sessionAttemptNumber}`);
 
-    // Calculate when processing should start (5 minute buffer after session ends)
-    const bufferMs = 5 * 60 * 1000;
-    const processingStartTime = new Date(endTime.getTime() + bufferMs);
+    // Detect if this is a past session or future/current session
+    const now = new Date();
+    const isPastSession = endTime < now;
 
-    // Generate retry schedule
-    const retrySchedule = generateRetrySchedule(endTime);
+    let processingStartTime;
+    let retrySchedule;
+
+    if (isPastSession) {
+      // Past session: Process immediately with quick retry schedule
+      processingStartTime = now; // Start processing NOW
+      retrySchedule = generateQuickRetrySchedule(now); // Only 3 quick attempts
+
+      const timeSinceEnd = Math.floor((now - endTime) / (1000 * 60)); // minutes
+      console.log(`[IndependentExercise] Past session detected (ended ${timeSinceEnd} minutes ago), processing immediately with quick schedule`);
+    } else {
+      // Future/current session: Wait for session to end + buffer
+      const bufferMs = 5 * 60 * 1000;
+      processingStartTime = new Date(endTime.getTime() + bufferMs);
+      retrySchedule = generateRetrySchedule(endTime); // Standard 11 attempts
+
+      console.log(`[IndependentExercise] Future session, processing starts at ${processingStartTime.toISOString()}`);
+    }
 
     // Create Session record with sessionType='complete'
     const session = await Session.create({
