@@ -174,17 +174,25 @@ export const calculateDataCompleteness = (actualDataPoints, expectedDataPoints) 
 };
 
 // Determine if partial data is acceptable based on attempt number
+// 4-Tier Progressive Thresholds:
+// Attempts 1-3: 80% (fresh sessions, expect good sync)
+// Attempts 4-6: 60% (Google Fit sync delays common)
+// Attempts 7-9: 50% (reasonable minimum for scoring)
+// Attempts 10-11: 40% (final attempts before fallback)
 export const shouldAcceptPartialData = (attemptNumber, completenessPercentage) => {
-  // Progressive acceptance based on attempt number
-  const thresholds = {
-    1: 100, // First attempt: need 100%
-    2: 90,  // 15 min: accept 90%
-    3: 80,  // 30 min: accept 80%
-    4: 70,  // 1 hour: accept 70%
-    5: 60,  // 3 hours: accept 60%
-    6: 50   // 6 hours: accept 50% (last chance)
-  };
-  
-  const threshold = thresholds[attemptNumber] || 80;
+  let threshold;
+
+  if (attemptNumber >= 1 && attemptNumber <= 3) {
+    threshold = 80; // Tier 1: Fresh sessions (0-15 min)
+  } else if (attemptNumber >= 4 && attemptNumber <= 6) {
+    threshold = 60; // Tier 2: Sync delays (20-30 min)
+  } else if (attemptNumber >= 7 && attemptNumber <= 9) {
+    threshold = 50; // Tier 3: Reasonable minimum (45 min - 2 hrs)
+  } else if (attemptNumber >= 10 && attemptNumber <= 11) {
+    threshold = 40; // Tier 4: Final attempts (5-12 hrs)
+  } else {
+    threshold = 40; // Default for attempt 12+ (historical fallback)
+  }
+
   return completenessPercentage >= threshold;
 };

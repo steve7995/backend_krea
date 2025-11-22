@@ -18,6 +18,7 @@ import {
   updateRetryScheduleItem,
   getNextPendingAttempt,
   calculateNextAttemptTime,
+  shouldAcceptPartialData,
 } from "../utils/scheduleHelper.js";
 import {
   acquireTokenLock,
@@ -691,6 +692,40 @@ const processSessionAttempt = async (sessionId) => {
     const dataCompleteness = imputationResult.completeness;
 
     console.log(`[ProcessSession] Data completeness: ${(dataCompleteness * 100).toFixed(1)}% (${dataCompleteness})`);
+
+    // Check if data completeness meets the threshold for this attempt
+    const completenessPercentage = dataCompleteness * 100;
+    const isDataSufficient = shouldAcceptPartialData(attemptNumber, completenessPercentage);
+
+    if (!isDataSufficient) {
+      console.log(
+        `[ProcessSession] Insufficient data completeness: ${completenessPercentage.toFixed(1)}% (attempt ${attemptNumber})`
+      );
+
+      // Check if this is attempt 11 (trigger historical fallback)
+      if (attemptNumber >= 11) {
+        console.log(
+          `[ProcessSession] Attempt 11 reached with insufficient data. Scheduling historical fallback...`
+        );
+        await scheduleHistoricalSyncFallback(session, attemptNumber, {
+          actualDataPoints: filteredHrData.length,
+          completeness: completenessPercentage,
+        });
+        return;
+      }
+
+      // Schedule next retry
+      await scheduleNextAttempt(session, attemptNumber, {
+        result: "insufficient_data",
+        dataPoints: filteredHrData.length,
+        errorMessage: `Only ${completenessPercentage.toFixed(1)}% data available (need ${shouldAcceptPartialData(attemptNumber, 100) ? '80%' : attemptNumber <= 6 ? '60%' : attemptNumber <= 9 ? '50%' : '40%'})`,
+      });
+      return;
+    }
+
+    console.log(
+      `[ProcessSession] ✓ Data completeness acceptable: ${completenessPercentage.toFixed(1)}% (attempt ${attemptNumber})`
+    );
 
     // Save the imputed data (includes both real and imputed points)
     if (imputedHrData.length > 0) {
