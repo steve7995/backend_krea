@@ -472,16 +472,21 @@ export const imputeMissingHRData = (hrData, sessionStartTime, sessionEndTime) =>
     }
   });
 
-  // Calculate median from existing HR values
+  // Calculate median from existing HR values (used as fallback)
   const existingValues = hrData.map(item => item.value);
   const medianHR = calculateMedian(existingValues);
 
+  // Calculate data completeness (coverage)
+  const validCount = averagedDataMap.size;
+  const coverage = validCount / durationMinutes;
+
   console.log(`[Imputation] Calculated median HR: ${medianHR} from ${existingValues.length} points`);
+  console.log(`[Imputation] Data coverage: ${(coverage * 100).toFixed(1)}% (${validCount}/${durationMinutes} minutes)`);
   console.log(`[Imputation] Expected timestamps (first 3): ${expectedTimestamps.slice(0, 3).map(t => new Date(t).toISOString()).join(', ')}`);
   console.log(`[Imputation] Data map keys (first 3): ${Array.from(averagedDataMap.keys()).slice(0, 3).map(t => new Date(t).toISOString()).join(', ')}`);
 
-  // Build complete dataset with imputed values
-  const completeHrData = expectedTimestamps.map(timestamp => {
+  // Build complete dataset with LINEAR INTERPOLATION or median fallback
+  const completeHrData = expectedTimestamps.map((timestamp, index) => {
     const existingValue = averagedDataMap.get(timestamp);
 
     if (existingValue !== undefined) {
@@ -492,10 +497,60 @@ export const imputeMissingHRData = (hrData, sessionStartTime, sessionEndTime) =>
         isImputed: false
       };
     } else {
-      // Imputed data point
+      // Missing data point - choose imputation strategy based on coverage
+      let imputedValue;
+
+      if (coverage < 0.4) {
+        // LOW COVERAGE (<40%): Use median for all missing points
+        // Too sparse for reliable interpolation
+        imputedValue = medianHR;
+      } else {
+        // SUFFICIENT COVERAGE (≥40%): Use linear interpolation
+
+        // Find previous valid data point
+        let prevIndex = -1;
+        let prevValue = null;
+        for (let i = index - 1; i >= 0; i--) {
+          const prevTimestamp = expectedTimestamps[i];
+          if (averagedDataMap.has(prevTimestamp)) {
+            prevIndex = i;
+            prevValue = averagedDataMap.get(prevTimestamp);
+            break;
+          }
+        }
+
+        // Find next valid data point
+        let nextIndex = -1;
+        let nextValue = null;
+        for (let i = index + 1; i < expectedTimestamps.length; i++) {
+          const nextTimestamp = expectedTimestamps[i];
+          if (averagedDataMap.has(nextTimestamp)) {
+            nextIndex = i;
+            nextValue = averagedDataMap.get(nextTimestamp);
+            break;
+          }
+        }
+
+        // Apply interpolation strategy
+        if (prevIndex !== -1 && nextIndex !== -1) {
+          // CASE 1: Both neighbors exist → Linear interpolation
+          const fraction = (index - prevIndex) / (nextIndex - prevIndex);
+          imputedValue = Math.round(prevValue + (nextValue - prevValue) * fraction);
+        } else if (prevIndex !== -1) {
+          // CASE 2: Only previous exists → Forward fill
+          imputedValue = Math.round(prevValue);
+        } else if (nextIndex !== -1) {
+          // CASE 3: Only next exists → Backward fill
+          imputedValue = Math.round(nextValue);
+        } else {
+          // CASE 4: No neighbors → Use median as fallback
+          imputedValue = medianHR;
+        }
+      }
+
       return {
         timestamp: timestamp,
-        value: medianHR,
+        value: imputedValue,
         isImputed: true
       };
     }
@@ -509,6 +564,15 @@ export const imputeMissingHRData = (hrData, sessionStartTime, sessionEndTime) =>
 
   console.log(`[Imputation] Created ${completeHrData.length} total points (${realCount} real, ${imputedCount} imputed)`);
   console.log(`[Imputation] Data completeness: ${(completeness * 100).toFixed(1)}% (${completeness.toFixed(3)})`);
+
+  // Log imputation method used
+  if (imputedCount > 0) {
+    if (coverage < 0.4) {
+      console.log(`[Imputation] Strategy: MEDIAN-ONLY (coverage ${(coverage * 100).toFixed(1)}% < 40%)`);
+    } else {
+      console.log(`[Imputation] Strategy: LINEAR INTERPOLATION (coverage ${(coverage * 100).toFixed(1)}% ≥ 40%)`);
+    }
+  }
 
   return {
     data: completeHrData,

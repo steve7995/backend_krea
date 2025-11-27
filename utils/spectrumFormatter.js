@@ -7,8 +7,8 @@ import { Session } from '../models/index.js';
 
 export const sendToSpectrum = async (sessionId, spectrumData) => {
   try {
-    const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/cardiac-rehab-session/${spectrumData.patient_id}`;
-    
+    const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/cardiac-rehab-session/${spectrumData.patient_id}`;
+
     console.log(`[Spectrum] Sending session ${sessionId} for patient ${spectrumData.patient_id}`);
     
     const response = await axios.post(SPECTRUM_URL, spectrumData, {
@@ -79,8 +79,8 @@ export const formatForSpectrum = (session, hrData, scores, zones) => {
 // Notify Spectrum that patient needs to reconnect
 export const notifySpectrumTokenExpired = async (patientId, sessionId = null) => {
   try {
-    const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/token-expired/${patientId}`;
-    
+    const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/token-expired/${patientId}`;
+
     const payload = {
       patient_id: patientId,
       message: 'Google Fit access expired. Patient needs to reconnect.',
@@ -115,7 +115,7 @@ export const notifySpectrumTokenExpired = async (patientId, sessionId = null) =>
 
 export const pushHistoricalHRToSpectrum = async (patientId, processedData) => {
   try {
-    const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/rehab-historical-hr/${patientId}`;
+    const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/rehab-historical-hr/${patientId}`;
 
     const payload = {
       patient_id: parseInt(patientId),
@@ -141,7 +141,7 @@ export const pushHistoricalHRToSpectrum = async (patientId, processedData) => {
 // Push resting HR to Spectrum
 export const pushRestingHRToSpectrum = async (patientId, restingHR) => {
   try {
-    const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/rehab-resting-hr/${patientId}`;
+    const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/rehab-resting-hr/${patientId}`;
 
     const payload = {
       patient_id: parseInt(patientId),

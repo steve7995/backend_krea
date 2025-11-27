@@ -827,9 +827,9 @@ const processSessionAttempt = async (sessionId) => {
     const hrValues = extractHRValues(imputedHrData);
     const hrStats = calculateHRStats(hrValues);
 
-    // Generate summary
+    // Generate summary using session risk level (not cumulative/overall)
     const summary = generateSessionSummary(
-      overallRiskLevel,
+      sessionRiskLevel,  // Use session-specific risk level instead of cumulative
       sessionRiskScore,
       zones,
       hrStats
@@ -1192,7 +1192,7 @@ const processHistoricalFallbackAttempt = async (session) => {
     const hrStats = calculateHRStats(hrValues);
 
     const summary = generateSessionSummary(
-      overallRiskLevel,
+      sessionRiskLevel,  // Use session-specific risk level instead of cumulative
       sessionRiskScore,
       zones,
       hrStats

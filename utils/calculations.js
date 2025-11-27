@@ -112,8 +112,8 @@ export const calculateTimeInZone = (hrReadings, zoneMin, zoneMax) => {
 
 // Generate summary text based on session performance
 export const generateSessionSummary = (riskLevel, sessionScore, zones, hrStats) => {
-  const scorePercentage = Math.round(sessionScore * 100);
-  
+  const scorePercentage = Math.round(sessionScore); // sessionScore is already 0-100, don't multiply by 100
+
   let summary = `${riskLevel} risk level detected. Session compliance: ${scorePercentage}%.`;
   
   // Add specific feedback

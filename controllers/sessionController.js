@@ -129,7 +129,7 @@ export const capturePatientSessionTime = async (req, res) => {
       console.log(`[SessionStart] Session ${session.id} created with status 'active'`);
 
       // POST to Spectrum - ONLY patientId and sessionDuration
-      const SPECTRUM_URL = `https://sandbox.spectrum-api.healthkon.com/api/patients/cardiac-rehab-session/${patientId}`;
+      const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/cardiac-rehab-session/${patientId}`;
 
       const spectrumPayload = {
         patientId: patientId,
