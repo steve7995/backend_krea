@@ -19,7 +19,7 @@ import {
   extractHRValues
 } from '../utils/googleFit.js';
 import { generateSessionSummary } from '../utils/calculations.js';
-import { formatForSpectrum, } from '../utils/matter.js';
+import { formatForSpectrum } from '../utils/spectrumFormatter.js';
 import axios from 'axios';
 
 // ========================================
