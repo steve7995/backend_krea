@@ -19,7 +19,7 @@ import {
   extractHRValues
 } from '../utils/googleFit.js';
 import { generateSessionSummary } from '../utils/calculations.js';
-import { formatForSpectrum, } from '../utils/spectrumFormatter.js';
+import { formatForSpectrum, } from '../utils/matter.js';
 import axios from 'axios';
 
 // ========================================
@@ -129,7 +129,7 @@ export const capturePatientSessionTime = async (req, res) => {
       console.log(`[SessionStart] Session ${session.id} created with status 'active'`);
 
       // POST to Spectrum - ONLY patientId and sessionDuration
-      const SPECTRUM_URL = `https://sandbox.cardihab.healthkon.com/api/patients/cardiac-rehab-session/${patientId}`;
+      const SPECTRUM_URL = `https://sandbox.cardihab-api.healthkon.com/api/patients/cardiac-rehab-session/${patientId}`;
 
       const spectrumPayload = {
         patientId: patientId,
