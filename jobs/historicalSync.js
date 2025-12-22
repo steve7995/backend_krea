@@ -308,10 +308,21 @@ import { pushHistoricalHRToSpectrum, pushRestingHRToSpectrum } from '../utils/sp
           // Format and store data
           const records = hrData.map(hr => {
             const timestamp = new Date(hr.timestamp);
+
+            // Store BOTH date and time in IST (server's local timezone)
+            // Using local timezone methods to ensure consistency with session storage
+            const year = timestamp.getFullYear();
+            const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+            const day = String(timestamp.getDate()).padStart(2, '0');
+            const istDate = `${year}-${month}-${day}`;
+
+            // toTimeString() already gives IST time (server local time)
+            const istTime = timestamp.toTimeString().split(' ')[0];
+
             return {
               patientId,
-              recordedDate: timestamp.toISOString().split('T')[0],
-              recordedTime: timestamp.toTimeString().split(' ')[0],
+              recordedDate: istDate,  // IST date (was UTC date before - BUG FIX)
+              recordedTime: istTime,  // IST time
               heartRate: hr.value,
               activityType: determineActivityType(hr.value, timestamp),
               dataSource: 'google_fit'

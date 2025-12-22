@@ -79,16 +79,20 @@ export const generateRetrySchedule = (sessionStartTime) => {
 };
 
 // Generate quick retry schedule for past independent sessions
-// Only 3 attempts with 5-minute intervals since data should already exist in Google Fit
+// Extended to 6 attempts to handle delayed wearable device syncs (can take hours)
 export const generateQuickRetrySchedule = (currentTime) => {
   const now = new Date(currentTime);
   const schedule = [];
 
-  // Quick schedule: 3 attempts only (data should already be synced to Google Fit)
+  // EXTENDED schedule: 6 attempts with progressive delays
+  // Handles both immediate syncs and delayed wearable syncs
   const delays = [
-    0,                    // Attempt 1: Immediate
-    5 * 60 * 1000,       // Attempt 2: +5 minutes
-    10 * 60 * 1000       // Attempt 3: +10 minutes
+    0,                      // Attempt 1: Immediate
+    10 * 60 * 1000,        // Attempt 2: +10 minutes
+    20 * 60 * 1000,        // Attempt 3: +20 minutes
+    45 * 60 * 1000,        // Attempt 4: +45 minutes
+    2 * 60 * 60 * 1000,    // Attempt 5: +2 hours
+    4 * 60 * 60 * 1000     // Attempt 6: +4 hours
   ];
 
   for (let i = 0; i < delays.length; i++) {
@@ -174,22 +178,22 @@ export const calculateDataCompleteness = (actualDataPoints, expectedDataPoints) 
 };
 
 // Determine if partial data is acceptable based on attempt number
-// 4-Tier Progressive Thresholds:
-// Attempts 1-3: 80% (fresh sessions, expect good sync)
-// Attempts 4-6: 60% (Google Fit sync delays common)
-// Attempts 7-9: 50% (reasonable minimum for scoring)
-// Attempts 10-11: 40% (final attempts before fallback)
+// Progressive Thresholds - More lenient for past sessions:
+// Attempts 1-2: 70% (past sessions, expect some delay)
+// Attempts 3-4: 60% (wearable sync delays common)
+// Attempts 5-6: 50% (reasonable minimum for scoring)
+// Attempts 7-11: 40% (final attempts before fallback)
 export const shouldAcceptPartialData = (attemptNumber, completenessPercentage) => {
   let threshold;
 
-  if (attemptNumber >= 1 && attemptNumber <= 3) {
-    threshold = 80; // Tier 1: Fresh sessions (0-15 min)
-  } else if (attemptNumber >= 4 && attemptNumber <= 6) {
-    threshold = 60; // Tier 2: Sync delays (20-30 min)
-  } else if (attemptNumber >= 7 && attemptNumber <= 9) {
-    threshold = 50; // Tier 3: Reasonable minimum (45 min - 2 hrs)
-  } else if (attemptNumber >= 10 && attemptNumber <= 11) {
-    threshold = 40; // Tier 4: Final attempts (5-12 hrs)
+  if (attemptNumber >= 1 && attemptNumber <= 2) {
+    threshold = 70; // Tier 1: Initial checks (0-10 min)
+  } else if (attemptNumber >= 3 && attemptNumber <= 4) {
+    threshold = 60; // Tier 2: Medium wait (20-45 min)
+  } else if (attemptNumber >= 5 && attemptNumber <= 6) {
+    threshold = 50; // Tier 3: Extended wait (2-4 hours)
+  } else if (attemptNumber >= 7 && attemptNumber <= 11) {
+    threshold = 40; // Tier 4: Final attempts or historical fallback
   } else {
     threshold = 40; // Default for attempt 12+ (historical fallback)
   }

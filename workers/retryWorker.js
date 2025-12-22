@@ -502,15 +502,16 @@ const processSessionAttempt = async (sessionId) => {
 
     // 6. Fetch HR data from Google Fit
     if (isOldSession) {
-      // OLD/PAST SESSION: Use progressive 3-cycle buffers (10min, 20min, 30min)
+      // OLD/PAST SESSION: Use progressive 3-cycle buffers with EXTENDED ranges
+      // Increased to ±30min, ±60min (1hr), ±90min (1.5hr) to catch delayed wearable syncs
       console.log(
-        `[ProcessSession] Session ${sessionId} - OLD SESSION detected, using progressive buffers...`
+        `[ProcessSession] Session ${sessionId} - OLD SESSION detected, using extended progressive buffers...`
       );
 
       const bufferCycles = [
-        { name: '10min', ms: 10 * 60 * 1000 },
-        { name: '20min', ms: 20 * 60 * 1000 },
-        { name: '30min', ms: 30 * 60 * 1000 }
+        { name: '30min', ms: 30 * 60 * 1000 },  // ±30 minutes
+        { name: '60min', ms: 60 * 60 * 1000 },  // ±1 hour
+        { name: '90min', ms: 90 * 60 * 1000 }   // ±1.5 hours
       ];
 
       let allFetchedData = [];

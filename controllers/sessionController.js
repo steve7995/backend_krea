@@ -293,9 +293,28 @@ export const scoreIndependentExercise = async (req, res) => {
       });
     }
 
-    // Parse session times
-    const startTime = new Date(sessionStartTime);
-    const endTime = new Date(sessionEndTime);
+    // Parse session times and convert from UTC to IST if needed
+    let startTime = new Date(sessionStartTime);
+    let endTime = new Date(sessionEndTime);
+
+    // Spectrum sends timestamps with 'Z' suffix (UTC), but the time value is actually IST
+    // Example: "2025-12-18T11:44:00.000Z" means 11:44 AM IST, not 11:44 AM UTC
+    // We need to convert: subtract 5:30 hours to get the correct IST moment
+    if (sessionStartTime.endsWith('Z') || sessionEndTime.endsWith('Z')) {
+      const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
+
+      console.log(`[IndependentExercise] Detected UTC format (Z suffix)`);
+      console.log(`[IndependentExercise] Original start (as UTC): ${startTime.toISOString()}`);
+      console.log(`[IndependentExercise] Original end (as UTC): ${endTime.toISOString()}`);
+
+      // Convert from UTC to IST by subtracting the offset
+      // This gives us the correct moment in time that Spectrum intended
+      startTime = new Date(startTime.getTime() - IST_OFFSET_MS);
+      endTime = new Date(endTime.getTime() - IST_OFFSET_MS);
+
+      console.log(`[IndependentExercise] Corrected start (IST): ${startTime.toISOString()} (${startTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })})`);
+      console.log(`[IndependentExercise] Corrected end (IST): ${endTime.toISOString()} (${endTime.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })})`);
+    }
 
     // Validate times
     if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
